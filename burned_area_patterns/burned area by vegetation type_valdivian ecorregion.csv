@@ -1,0 +1,19 @@
+class,vegetation_code,vegetation_name,area_ha,percent burned/available,quotient over subantarctic,percent burnable area
+available,0,Non burnable,709229.301180872,0.697651984192593,0.210744359835954,NA
+available,1,Subalpine forest (lenga),800760.797027474,3.31041829416291,1,0.361289051915201
+available,2,"Wet forest (coihue, raulí, roble pellín)",321593.023658615,5.50988409345955,1.66440721499601,0.145097061508841
+available,3,"Dry forest (araucaria, ciprés)",260568.48743792,7.16497951210233,2.1643728602926,0.11756387442403
+available,4,Shrubland,437423.483393245,8.81562763976003,2.66299508291873,0.197357708053692
+available,5,Steppe and grassland,342990.30319449,5.24156671912193,1.58335480696325,0.154751134068059
+available,6,Anthropogenic prairie and shrubland,43661.3118564629,2.83945086060621,0.857731745143164,0.019699208583327
+available,7,Plantation,9401.88032582934,12.7724193582483,3.85824938823269,0.00424196144685
+burned,0,Non burnable,4947.95229216361,NA,NA,NA
+burned,1,Subalpine forest (lenga),26508.5319172822,NA,NA,NA
+burned,2,"Wet forest (coihue, raulí, roble pellín)",17719.4028562416,NA,NA,NA
+burned,3,"Dry forest (araucaria, ciprés)",18669.6787399219,NA,NA,NA
+burned,4,Shrubland,38561.625504816,NA,NA,NA
+burned,5,Steppe and grassland,17978.0655820578,NA,NA,NA
+burned,6,Anthropogenic prairie and shrubland,1239.7414952603,NA,NA,NA
+burned,7,Plantation,1200.84758277557,NA,NA,NA
+,,,,,,
+,,,5.4989141351489,,,
