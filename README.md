@@ -8,4 +8,4 @@ patagonian_fires_raw.shp shows the raw result from the burned area segmentation 
   
 All files are in WGS84 coordinate reference system.  
   
-In kml file, the field "fire_id" was renamed as "name", and the original "name" was renamed "name2" for them to display the fire_id on the left menu on Google Earth.
+In the kml file, the field "fire_id" was renamed as "name", and the original "name" was renamed "name2" for them to display the fire_id on the left menu on Google Earth.
