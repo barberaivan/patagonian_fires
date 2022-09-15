@@ -2,12 +2,23 @@
 
 library(tidyverse); theme_set(theme_bw())
 library(viridis)
+library(grid); library(gtable)
+# library(gridExtra) # conflictúa con gtable?
+
 library(circular) # density.circular, for aspect
 
 library(rgdal)       # readOGR
 library(rgeos)       # gIntersection, gArea...
 library(maptools)    # UnionSpatialPolygons
 
+# function to share legend --------------------------------------------------
+#https://github.com/hadley/ggplot2/wiki/Share-a-legend-between-two-ggplot2-graphs
+g_legend<-function(a.gplot){
+  tmp <- ggplot_gtable(ggplot_build(a.gplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)
+}
 
 # Data --------------------------------------------------------------------
 
@@ -29,8 +40,20 @@ veg_levels <- c("Wet forest",
                 "Steppe and grassland",
                 "Non burnable")
 
+veg_levels2 <- c("Wet forest",
+                 "Subalpine\nforest",
+                 "Plantation",
+                 "Dry forest",
+                 "Shrubland",
+                 "Anthropogenic prairie\nand shrubland",
+                 "Steppe and\ngrassland",
+                 "Non burnable")
 
-# Burned area by vegetation type ------------------------------------------
+# Distribution of spatial variables in burned and available area ----------
+
+
+# Vegetation type
+
 
 burned_veg_long <- pivot_longer(burned_veg[, c("vegetation_class", 
                                                "percent_available_area",
@@ -44,56 +67,61 @@ burned_veg_long$class <- plyr::revalue(
 )
 burned_veg_long <- burned_veg_long[complete.cases(burned_veg_long), ]
 burned_veg_long$vegetation_class <- factor(burned_veg_long$vegetation_class,
-                                           levels = veg_levels)
+                                           levels = veg_levels,
+                                           labels = veg_levels2)
+burned_veg_long$variable <- "Vegetation type"
 
-ggplot(burned_veg_long, aes(x = vegetation_class, y = percent_area, 
-                            colour = class, fill = class)) + 
+veg_dist <- 
+ggplot(burned_veg_long, 
+       aes(x = vegetation_class, y = percent_area / 100, 
+           colour = class, fill = class)) + 
   geom_bar(stat = "identity", position = position_dodge2(width = 0.5,
-                                                         padding = 0.05)) +
+                                                         padding = 0.05),
+           alpha = 0.2) +
   scale_color_viridis(discrete = TRUE, option = "B", end = 0.5) +
   scale_fill_viridis(discrete = TRUE, option = "B", end = 0.5) +
   theme(legend.title = element_blank(),
         panel.grid.minor = element_blank(),
-        legend.position = "bottom",
-        axis.text.x = element_text(angle = 25, hjust = 0.5, vjust = 0.5))
+        legend.position = "none",
+        axis.text.x = element_text(angle = 25, hjust = 0.5, vjust = 0.67),
+        axis.title.x = element_blank()) +
+  facet_wrap(vars(variable)) +
+  ylab("Probability mass")
+veg_dist
 # ggsave("figure_burned_area_by_veg.png")
 
 
 
 
-# Distribution of spatial variables in burned and available area ----------
+# Compute density separately for the next plots, to make a facet_wrap later.
+l <- 512 * 2 * 5
+dlist <- vector(mode = "list", length = 5)
+names(dlist) <- c("elevation_m", "slope", "aspect", 
+                  "distance_humans_m", "distance_roads_m")
+
+# rescale distances to km
+spatial_vars[, c("distance_humans_m", "distance_roads_m")] <-
+  spatial_vars[, c("distance_humans_m", "distance_roads_m")] / 1000  
 
 
-
-spatial_vars_long <- pivot_longer(
-  spatial_vars, cols = which(names(spatial_vars) != "class"),
-  names_to = "variable", values_to = "value"
-)
-
-spatial_vars_long$variable <- factor(spatial_vars_long$variable,
-                                     levels = c("ndvi_max", "distance_humans_m",
-                                                "distance_roads_m", 
-                                                "elevation_m", "slope",
-                                                "aspect"),
-                                     labels = c("NDVI max", "Distance from settlements (m)",
-                                                "Distance from roads (m)",
-                                                "Elevation (masl)", "Slope (°)",
-                                                "Aspect (°)"))
-
-
-ggplot(spatial_vars_long, aes(x = value, colour = class, fill = class)) + 
-  geom_density(alpha = 0.2) + 
-  facet_wrap(vars(variable), scales = "free") + 
-  scale_color_viridis(discrete = TRUE, option = "B", end = 0.5) +
-  scale_fill_viridis(discrete = TRUE, option = "B", end = 0.5) +
-  theme(panel.grid.minor = element_blank(),
-        legend.title = element_blank()) +
-  xlab("variable")
-# ggsave("figure_spatial_variables.png")
+for(i in 1:length(dlist)) {
+  
+  # i = 1
+  v <- names(dlist)[i]
+  d_burned <- density(spatial_vars[spatial_vars$class == "burned", v], from = 0)
+  d_av <- density(spatial_vars[spatial_vars$class == "available", v], from = 0)
+  
+  dlist[[i]] <- data.frame(variable = v,
+                           value = c(d_burned$x, d_av$x),
+                           density = c(d_burned$y, d_av$y),
+                           class = factor(rep(c("Burned", "Available"), 
+                                              each = length(d_av$x)),
+                                          levels = c("Burned", "Available"))
+  )
+}
 
 
-
-# Aspect, circular density -----------------------------------------------
+# Compute density for aspect (circular distribution)
 
 filter_b <- spatial_vars$class == "burned"
 filter_ub <- spatial_vars$class == "available"
@@ -105,34 +133,70 @@ aspect_unburned <- circular(spatial_vars$aspect[filter_ub],
                             type = "angles", units = "degrees",
                             template = "geographic")
 
-bw_circ <- 30 # smaller = smoother
+bw_circ <- 20 # smaller = smoother
 
 d_burned <- density.circular(aspect_burned, bw = bw_circ)
 d_unburned <- density.circular(aspect_unburned, bw = bw_circ)
 
 x_mine <- seq(0, 360, length.out = length(d_unburned$x))
 
-aspect_plot <- rbind(
-  data.frame(aspect = x_mine, density = d_unburned$y),
-  data.frame(aspect = x_mine, density = d_burned$y)
+aspect_data <- rbind(
+  data.frame(variable = "aspect", value = x_mine, density = d_unburned$y, class = "Available"),
+  data.frame(variable = "aspect", value = x_mine, density = d_burned$y, class = "Burned")
 )
-aspect_plot$class <- rep(c("available", "burned"), each = length(d_unburned$x))
+aspect_data$class <- factor(aspect_data$class, levels = c("Burned", "Available"))
 
-# order (not necessary)
-# aspect_plot <- aspect_plot[order(aspect_plot$type, 
-#                                  aspect_plot$aspect, 
-#                                  aspect_plot$density), ]
+dlist$aspect <- aspect_data
 
-ggplot(aspect_plot, aes(x = aspect, y = density, colour = class,
-                        fill = class)) + 
-  geom_line() + 
-  coord_polar() + 
-  scale_color_viridis(discrete = TRUE, option = "B", end = 0.5) +
-  scale_fill_viridis(discrete = TRUE, option = "B", end = 0.5) +
-  scale_x_continuous(breaks = c(0, 90, 180, 270), 
-                     labels = c("N", "E", "S", "W")) + 
-  theme(legend.title = element_blank())
-# ggsave("figure_aspect.png")
+
+
+# merge variables in df
+d_data <- do.call("rbind", dlist)
+d_data$variable <- plyr::revalue(d_data$variable,
+                         c("elevation_m" = "Elevation (m a.s.l.)", 
+                           "slope" = "Slope (°)",
+                           "aspect" = "Aspect",
+                           "distance_humans_m" = "Distance from human\nsettlements (km)", 
+                           "distance_roads_m" = "Distance from\nroads (km)"))
+d_data$variable <- factor(d_data$variable, levels = 
+                          c("Elevation (m a.s.l.)", 
+                            "Aspect",
+                            "Slope (°)",
+                            "Distance from human\nsettlements (km)", 
+                            "Distance from\nroads (km)"))
+
+
+var5plot <- ggplot(d_data, 
+                   aes(x = value, y = density, ymin = 0, ymax = density,
+                       colour = class, fill = class)) + 
+  # geom_line(show.legend = F) + 
+  # geom_ribbon(alpha = 0.2, colour = NA) +
+  geom_ribbon(alpha = 0.2, size = 0.4) +  
+  geom_hline(yintercept = 0, colour = "white", size = 0.45, alpha = 1) +
+  facet_wrap(vars(variable), ncol = 3, scales = "free") +
+  scale_color_viridis(discrete = TRUE, option = "B", end = 0.5, direction = -1) +
+  scale_fill_viridis(discrete = TRUE, option = "B", end = 0.5, direction = -1) +
+  theme(panel.grid.minor = element_blank(),
+        legend.title = element_blank(),
+        legend.position = c(0.85, 0.25)) +
+  xlab("Variable") + 
+  ylab("Probability density")
+var5plot
+
+
+
+
+# Merge this and vegetation type
+veg_dist2 <- veg_dist + theme(axis.title.y = element_text(vjust = 7),
+                              plot.margin = unit(c(2,2,2,7), "mm"))
+# veg_dist2
+ggpubr::ggarrange(veg_dist2, 
+                  var5plot, 
+                  nrow = 2, heights = c(1.3, 2))
+ggsave("Figure 03 - spatial variables distributions.jpeg",
+       width = 17, height = 21, units = "cm", dpi = 500)
+
+
 
 
 

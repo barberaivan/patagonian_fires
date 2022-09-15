@@ -2,7 +2,7 @@
 <kml xmlns="http://www.opengis.net/kml/2.2">
 <Document id="root_doc">
 <Schema name="2006" id="2006">
-	<SimpleField name="year" type="int"></SimpleField>
+	<SimpleField name="year" type="float"></SimpleField>
 	<SimpleField name="area_ha" type="float"></SimpleField>
 	<SimpleField name="date" type="string"></SimpleField>
 	<SimpleField name="date_l" type="string"></SimpleField>
