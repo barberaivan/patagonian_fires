@@ -4,6 +4,18 @@ TAREAS
 - editar codigo en gee // OK
 - volver a samplear data en burned y unburned // OK
 
+- Calcular todos los asuntos de área en R, en posgar 2007,
+	porque no confío en los nros que tira GEE. No es consistente.
+	
+	Será por el clip(study_area) que hice en gee para el reburn?
+	quizás eso es menos preciso que usar fires_clipped.
+	No, eso no cambia.
+	
+	Comparar datos en R por las dudas.
+	Todo igual: el problema debe ser la rasterización.
+	
+	// OK
+
 - procesar fwi data
 - continuar con los plots
 
