@@ -91,6 +91,64 @@ colnames(train)[names_to_change] <- c("dnbr_mean", "dnbr_min", "nbr_min")
 errorcito <- with(train, which(nbr_min < -0.2 & Burned == 0))
 train <- train[-errorcito, ]
 
+# custom ggplot theme -----------------------------------------------------
+
+# from https://rpubs.com/mclaire19/ggplot2-custom-themes
+
+theme_mine <- function() { 
+  font <- "Arial"   #assign font family up front
+  marg <- 2 # figure margin in mm
+  
+  theme_bw() %+replace%    #replace elements we want to change
+    
+    theme(
+      
+      #grid elements
+      #panel.grid.major = element_blank(),    #strip major gridlines
+      panel.grid.minor = element_blank(),    #strip minor gridlines
+      #axis.ticks = element_blank(),          #strip axis ticks
+      
+      #text elements
+      plot.title = element_text(             #title
+        family = font,            #set font family
+        size = 16,                #set font size
+        #face = 'bold',            #bold typeface
+        hjust = -0.1,                #left align
+        vjust = 1),               
+      
+      # plot.subtitle = element_text(          #subtitle
+      #   family = font,            #font family
+      #   size = 14),               #font size
+      
+      axis.title = element_text(             #axis titles
+        family = font,            #font family
+        size = 12),               
+      
+      # para separar el eje y de los nros
+      axis.title.y = element_text(             
+        margin = margin(t = 0, r = 2, b = 0, l = 0, "mm"),
+        angle = 90),
+      
+      axis.text = element_text(              #axis text
+        family = font,            #axis family
+        size = 9),                #font size
+      
+      legend.title = element_blank(),
+      legend.position = "bottom",
+      legend.text = element_text(size = 9, family = font),
+      
+      strip.text = element_text(size = 12, family = font, color = "white"),
+      strip.text.x = element_text(margin = margin(1.2,0,1.2,0, "mm")), # tamaño de la cajita
+      strip.text.y = element_text(margin = margin(0,1.2,0,1.2, "mm")),
+      strip.background = element_rect(fill = "gray10", color = "gray10"),
+      
+      plot.margin = unit(c(marg, marg, marg, marg), "mm")
+    )
+}
+
+theme_set(theme_mine())
+
+
 # Exploration -------------------------------------------------------------
 
 # vars que quiero mirar:
@@ -158,7 +216,7 @@ p_all$variable <- rep(c("NBR_min", "dNBR_min", "dNBR_mean"), each = nrow(p_min))
 
 plot1 <- 
 ggplot(train_long, aes(x = value, y = Burned, colour = ndvi_max)) + 
-  geom_jitter(alpha = 0.15, height = 0.3) +
+  geom_jitter(alpha = 0.08, height = 0.2) +
   #scale_color_gradient(low = "blue", high = "red") + 
   geom_line(data = p_all, mapping = aes(x = x, y = p, 
                                         group = as.factor(ndvi_max))) + 
@@ -167,8 +225,10 @@ ggplot(train_long, aes(x = value, y = Burned, colour = ndvi_max)) +
   xlab("NBR-based index") + 
   ylab("Burn probability") + 
   labs(colour = "NDVI_max") + 
+  theme(legend.position = "right", 
+        legend.title = element_text()) +
+  scale_y_continuous(breaks = seq(0, 1, by = 0.25)) +
   ggtitle("A")
-
 plot1
 
 # kesigue? ----------------------------------------------------------------
@@ -298,10 +358,15 @@ plot2
 
 # Save plots --------------------------------------------------------------
 
-
-ggarrange(plot1, plot2, nrow = 2)
-ggsave("Figure S01 - pixel level classication.jpeg", 
-       width = 17, height = 15, units = "cm")
+marg <- 2
+ggarrange(plot1 + 
+            theme(plot.margin = unit(c(marg, marg + 4.5, marg, marg), "mm"),
+                  axis.text = element_text(size = 8)), 
+          plot2 + 
+            theme(axis.text = element_text(size = 8)), 
+          nrow = 2)
+ggsave("figures/Figure S01 - pixel level classication.jpeg", 
+       width = 17, height = 15, units = "cm", dpi = 500)
 
 
 
