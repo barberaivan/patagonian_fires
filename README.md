@@ -6,6 +6,8 @@ patagonian_fires.shp has the filtered fires, excluding those smaller than 10 ha,
 patagonian_fires_extended.shp includes a few more fires meeting those conditions, with a few occurred before 1999.  
 patagonian_fires_raw.shp shows the raw result from the burned area segmentation performed in Google Earth Engine. As these polygons were not checked, many false positives can be found. However, it may be useful to find fires that were discarded but the user is certain about.  
   
+patagonian_fires_eastern.shp includes the patagonian_fires files and around 70 more fires mapped towards the East. It was produced mainly by Juan Paritsis to be used in a pine plantations study. These extra fires may show a lower-quality mapping, because the mapping procedure was tuned using only a few steppe fires which occurred in more productive steppes. For example, a few fires show many isolated tiny polygons that are probably noise, not burned area.  
+  
 All files are in WGS84 coordinate reference system.  
   
 The fire date was obtained mainly from Landsat imagery, but also from MODIS for large fires. This is indicated in 'datesrc'. If MODIS was used, 'date_l' (for lower) is the first hotspot found, and 'date_u' (for upper) is the latest. If Landsat was used, 'date_l' is the latest date before the NBR dropped, and 'date_u' is the earliest date when the NBR was lower than expected in the absence of fire. 'collec' means nothing useful for users.  
