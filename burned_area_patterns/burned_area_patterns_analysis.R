@@ -92,17 +92,36 @@ theme_set(theme_mine())
 
 
 
-# Data --------------------------------------------------------------------
+# Data for spatial analyses -----------------------------------------------
 
+# veg_type distribution
 burned_veg <- read.csv("data_burned_and_available_area_by_vegetation.csv")
-spatial_vars <- read.csv("data_spatial_variables.csv")
-ndvi_raw <- read.csv("data_ndvi_by_vegetation.csv")
-colnames(ndvi_raw)[colnames(ndvi_raw) == "vegetation_valdivian"] <- "vegetation_code"
-ndvi_raw <- ndvi_raw[, c("class", "ndvi_max", "vegetation_code")]
-ndvi <- left_join(ndvi_raw, 
-                  burned_veg[, c("vegetation_code", "vegetation_class")], 
-                  by = "vegetation_code")
 
+# spatial variables marginal to veg_type
+spatial_vars <- read.csv("data_spatial_variables.csv")
+names(spatial_vars)[grep("distance_", names(spatial_vars))] <- c("dist_humans", "dist_roads")
+spatial_vars$vegetation_valdivian <- 99 # altogether
+
+# spatial variables conditional to veg_type
+spatial_vars_veg0 <- read.csv("data_ndvi-pp-temp-elev-aspect-slope-solar-distances_by_vegetation.csv")
+# order and filter columns
+spatial_vars_veg <- spatial_vars_veg0[, c("class", "vegetation_valdivian",
+                                          "ndvi_max", 
+                                          "elevation", "aspect", "slope",
+                                          "dist_humans", "dist_roads")]
+
+# merge both data sets
+spatdata0 <- rbind(spatial_vars_veg, 
+                   spatial_vars[, names(spatial_vars_veg)])
+names(spatdata0)[2] <- "vegetation_code"
+
+# get name of vegetation type
+spatdata <- left_join(spatdata0, 
+                      burned_veg[, c("vegetation_code", "vegetation_class")], 
+                      by = "vegetation_code")
+spatdata$vegetation_class[spatdata$vegetation_code == 99] <- "All vegetation types"
+
+# make levels
 veg_levels <- c("Wet forest",
                 "Subalpine forest",
                 "Plantation",
@@ -110,7 +129,8 @@ veg_levels <- c("Wet forest",
                 "Shrubland",
                 "Anthropogenic prairie and shrubland",
                 "Steppe and grassland",
-                "Non burnable")
+                # "Non burnable",
+                "All vegetation types")
 
 veg_levels2 <- c("Wet forest",
                  "Subalpine\nforest",
@@ -119,9 +139,15 @@ veg_levels2 <- c("Wet forest",
                  "Shrubland",
                  "Anthropogenic prairie\nand shrubland",
                  "Steppe and\ngrassland",
-                 "Non burnable")
+                 # "Non burnable",
+                 "All vegetation\ntypes")
+
+# Relabel available for burnable
+spatdata$class <- plyr::revalue(spatdata$class, replace = c("Available" = "Burnable"))
+spatdata$class <- factor(spatdata$class, levels = c("Burned", "Burnable"))
 
 
+# Fig. 5: ----------------------------------------------------------------
 # Distribution of spatial variables in burned and available area ----------
 
 
@@ -136,8 +162,8 @@ veg_dist_data <- data.frame(
   ),
   prob = c(burned_veg$prob_av[-1], burned_veg$prob_b[-1]),
   class = factor(
-    rep(c("Available", "Burned"), each = nrow(burned_veg) - 1),
-    levels = c("Available", "Burned")
+    rep(c("Burnable", "Burned"), each = nrow(burned_veg) - 1),
+    levels = c("Burnable", "Burned")
     ),
   variable = "Vegetation type"
 )
@@ -174,111 +200,286 @@ ggplot(veg_dist_data,
   geom_text(data = data_ol, inherit.aes = FALSE,
             mapping = aes(x = vegetation_class, y = prob, label = lab), 
             colour = "black")
-veg_dist
-# ggsave("figure_burned_area_by_veg.png")
+# veg_dist
 
-# Densities and overlap
+veg_dist2 <- veg_dist + 
+  theme(axis.title.y = element_text())
 
-n_var <- 6
-l <- 512 * 2 * n_var
+# ggsave("figures/Figure - vegetation distribution.png", veg_dist2, 
+#        width = 17, height = 9, units = "cm", dpi = 300)
+
+
+# Fig 6: ------------------------------------------------------------------
+# Densities and overlap by veg type -----------------------------------------
+
+var_names <- c("ndvi_max", 
+               "elevation", "slope", "aspect", 
+               "dist_humans_km", "dist_roads_km")
+n_var <- length(var_names)
+n_veg <- length(veg_levels) # includes overall
 
 # list to save densities
 dlist <- vector(mode = "list", length = n_var)
-names(dlist) <- c("elevation", "slope", "aspect", "solar",
-                  "distance_humans_km", "distance_roads_km")
+names(dlist) <- var_names
+
 # list to save overlaps
-ovlist <- dlist
+overlap_data <- expand.grid(vegetation_class = veg_levels,
+                            variable = names(dlist),
+                            overlap_num = NA,
+                            overlap_char = NA,
+                            value = NA,   # variables to plot alongside dplots
+                            density = NA)
 
 # rescale distances to km
-spatial_vars$distance_humans_km <- spatial_vars$distance_humans / 1000  
-spatial_vars$distance_roads_km <- spatial_vars$distance_roads / 1000  
+spatdata$dist_humans_km <- spatdata$dist_humans / 1000  
+spatdata$dist_roads_km <- spatdata$dist_roads / 1000  
+
+# get ranges to evaluate variables
+ranges <- data.frame(vari = var_names,
+                     mindens = rep(0, n_var),
+                     maxdens = c(1, # ndvi
+                                 max(spatdata$elevation) * 1.1, 90, 360, # topo
+                                 40, 30)#, # dist (km)
+                     
+                     # evaluate densities at their possible (not observed) range
+                     # so I dont use this
+                     
+                     # mineval = c(min(spatdata$ndvi_max),
+                     #             min(spatdata$elevation), min(spatdata$aspect), min(spatdata$slope),
+                     #             min(spatdata$dist_humans_km), min(spatdata$dist_roads_km)),
+                     # maxeval = c(max(spatdata$ndvi_max),
+                     #             max(spatdata$elevation), max(spatdata$aspect), max(spatdata$slope),
+                     #             max(spatdata$dist_humans_km), max(spatdata$dist_roads_km))
+                     )
 
 # Compute densities and overlap
-for(i in 1:length(dlist)) {
-  
-  # i = 3
-  v <- names(dlist)[i]
-  
-  # densities
-  d_burned <- density(spatial_vars[spatial_vars$class == "Burned", v], from = 0)
-  d_av <- density(spatial_vars[spatial_vars$class == "Available", v], from = 0)
-  
-  if(v == "aspect") {
-    filter_b <- spatial_vars$class == "Burned"
-    filter_av <- spatial_vars$class == "Available"
-    
-    aspect_burned <- circular(spatial_vars$aspect[filter_b], 
-                              type = "angles", units = "degrees",
-                              template = "geographic")
-    aspect_av <- circular(spatial_vars$aspect[filter_av], 
-                                type = "angles", units = "degrees",
-                                template = "geographic")
-    
-    bw_circ <- 20 # smaller = smoother
-    
-    d_burned <- density.circular(aspect_burned, bw = bw_circ)
-    d_av <- density.circular(aspect_av, bw = bw_circ)
-    
-  }
-  
-  # densities df
-  dlist[[i]] <- data.frame(variable = v,
-                           value = c(d_burned$x, d_av$x),
-                           density = c(d_burned$y, d_av$y),
-                           class = factor(rep(c("Burned", "Available"), 
-                                              each = length(d_av$x)),
-                                          levels = c("Burned", "Available")))
-  
-  # Compute delta and overlap
-  
-  # approximate densities on a common x sequence
-  xseq <- seq(min(dlist[[i]]$value), max(dlist[[i]]$value), length.out = 200)
-  if(v == "aspect") {
-    xseq <- seq(max(d_av$x), min(d_av$x), length.out = 200)
-  }
-  diff_size <- abs(unique(diff(xseq))[1])
-  
-  d_burned_pred <- approx(d_burned$x, d_burned$y, xseq, method = "linear",
-                          yleft = 0, yright = 0)
-  d_av_pred <- approx(d_av$x, d_av$y, xseq, method = "linear",
-                      yleft = 0, yright = 0)
-
-  # circular densities are not normalized, so we get the normalizing factor
-  if(v == "aspect") {
-    auc_b <- sum(d_burned_pred$y * diff_size)
-    auc_av <- sum(d_av_pred$y * diff_size)
-    norm_factor <- 1/ mean(auc_b, auc_av)
-  }
-  
-  den_diff <- (d_burned_pred$y - d_av_pred$y) 
-  delta <-  ((abs(den_diff) * diff_size) %>% sum) / 2
-  if(v == "aspect") {delta <- delta * norm_factor}
-  overlap <- 1 - delta
-  
-  # delta and overlap df
-  ovlist[[i]] <- data.frame(variable = v, 
-                            value = quantile(xseq, 0.8),
-                            density = max(c(d_burned$y, d_av$y)) * 0.8,
-                            overlap = paste(round(overlap * 100, 2), "%"),
-                            delta = paste(round(delta * 100, 2), "%"))
-  
-}
-
-# good variable names:
-var_names <- 
-c("Elevation (m a.s.l.)", 
-  "Slope (°)",
-  "Aspect (°)",
-  "Mean daily solar\nirradiation (kWh / m2)",
-  "Distance from human\nsettlements (km)", 
-  "Distance from\nroads (km)")
-
-plot_list <- list()
 for(i in 1:n_var) {
   
-  # i <- 1
-  plot_list[[i]] <- 
-  ggplot(dlist[[i]], 
+  # i = 4
+  v <- names(dlist)[i]
+  print(v)
+  
+  veg_list <- vector(mode = "list", length = n_veg)
+  names(veg_list) <- veg_levels
+  
+  # loop over veg_types
+  for(veg in veg_levels) {
+    
+    # veg <- "Wet forest"
+    print(veg)
+    
+    dat <- spatdata %>% filter(vegetation_class == veg)
+    
+    d_burned <- density(dat[dat$class == "Burned", v], 
+                        from = ranges$mindens[ranges$vari == v], 
+                        to = ranges$maxdens[ranges$vari == v])
+    d_av <- density(dat[dat$class == "Burnable", v], 
+                    from = ranges$mindens[ranges$vari == v], 
+                    to = ranges$maxdens[ranges$vari == v])
+    
+    if(v == "aspect") {
+      filter_b <- dat$class == "Burned"
+      filter_av <- dat$class == "Burnable"
+      
+      aspect_burned <- circular(dat$aspect[filter_b], 
+                                type = "angles", units = "degrees",
+                                template = "geographic")
+      aspect_av <- circular(dat$aspect[filter_av], 
+                            type = "angles", units = "degrees",
+                            template = "geographic")
+      
+      bw_circ <- 20 # smaller = smoother
+      
+      d_burned <- density.circular(aspect_burned, bw = bw_circ)
+      d_av <- density.circular(aspect_av, bw = bw_circ)
+      
+    }
+    
+    # densities df
+    veg_list[[veg]] <- data.frame(variable = v,
+                             vegetation_class = veg,
+                             value = c(d_burned$x, d_av$x),
+                             density = c(d_burned$y, d_av$y),
+                             class = factor(rep(c("Burned", "Burnable"), 
+                                                each = length(d_av$x)),
+                                            levels = c("Burned", "Burnable")))
+    
+    # Compute delta and overlap
+    
+    # approximate densities on a common x sequence
+    xseq <- seq(ranges$mindens[i], ranges$maxdens[i], length.out = 200)
+    if(v == "aspect") {
+      xseq <- seq(max(d_av$x), min(d_av$x), length.out = 200)
+    }
+    diff_size <- abs(unique(diff(xseq))[1])
+    
+    d_burned_pred <- approx(d_burned$x, d_burned$y, xseq, method = "linear",
+                            yleft = 0, yright = 0)
+    d_av_pred <- approx(d_av$x, d_av$y, xseq, method = "linear",
+                        yleft = 0, yright = 0)
+    
+    # circular densities are not normalized, so we get the normalizing factor
+    if(v == "aspect") {
+      auc_b <- sum(d_burned_pred$y * diff_size)
+      auc_av <- sum(d_av_pred$y * diff_size)
+      norm_factor <- 1 / mean(auc_b, auc_av)
+    }
+    
+    den_diff <- (d_burned_pred$y - d_av_pred$y) 
+    delta <-  ((abs(den_diff) * diff_size) %>% sum) / 2
+    if(v == "aspect") {delta <- delta * norm_factor}
+    overlap <- 1 - delta
+    
+    # fill overlap df
+    fff <- overlap_data$variable == v & overlap_data$vegetation_class == veg
+    overlap_data$overlap_num[fff] <- overlap
+    overlap_data$overlap_char[fff] <- paste(round(overlap * 100, 2), "%")
+    overlap_data$value[fff] <- quantile(xseq, 0.8)
+    overlap_data$density[fff] <- max(c(d_burned$y, d_av$y)) * 0.8
+    
+  } # end loop across veg_types
+  
+  dlist[[v]] <- do.call("rbind", veg_list)
+  
+} # end loop across variables
+
+# merge in one df
+densdata0 <- do.call("rbind", dlist)
+
+# good variable names:
+names_frame <- data.frame(variable = var_names,
+                          var_name = c("NDVI max",
+                                       "Elevation (m a.s.l.)", 
+                                       "Slope (°)",
+                                       "Aspect (°)",
+                                       "Distance from human\nsettlements (km)", 
+                                       "Distance from\nroads (km)"))
+densdata <- left_join(densdata0, names_frame, by = "variable")
+densdata$vegetation_class <- factor(densdata$vegetation_class,
+                                    levels = veg_levels,
+                                    labels = veg_levels2)
+str(densdata)
+
+overlap_data <- left_join(overlap_data, names_frame, by = "variable")
+overlap_data$vegetation_class <- factor(overlap_data$vegetation_class,
+                                        levels = veg_levels,
+                                        labels = veg_levels2)
+
+# move overlap values to avoid overlapping the densities
+overlap_data$value[overlap_data$variable == "ndvi_max"] <- 0.25
+overlap_data$value[overlap_data$variable == "elevation"] <- 2000
+overlap_data$density[overlap_data$variable == "aspect"] <- 
+  overlap_data$density[overlap_data$variable == "aspect"] * 0.4
+
+
+# var_names <- c("ndvi_max", 
+#                "elevation", "slope", "aspect", 
+#                "dist_humans_km", "dist_roads_km")1
+
+# Make plots
+
+
+plist <- vector(mode = "list", length = n_var)
+
+
+for(i in 1:n_var) {
+  # i = 1
+  
+  
+  ## OJO, ACÁ DEFINIR SI EL PLOT VA CON O SIN PLANTATION Y ANTHROP
+  
+  dd <- densdata[densdata$var_name == names_frame$var_name[i] & 
+                 !(densdata$vegetation_class %in% veg_levels2[c(3, 6)]), ]
+  
+  ov_d <- overlap_data[overlap_data$var_name == names_frame$var_name[i] &
+                       !(overlap_data$vegetation_class %in% veg_levels2[c(3, 6)]),]
+  
+  plist[[i]] <- ggplot(dd, 
+                       aes(x = value, y = density, ymin = 0, ymax = density,
+                           colour = class, fill = class)) + 
+    geom_line() + 
+    geom_ribbon(alpha = 0.2, colour = NA) +
+    # geom_ribbon(alpha = 0.2, size = 0.4) +  
+    # geom_hline(yintercept = 0, colour = "white", size = 0.45, alpha = 1) +
+    facet_grid(rows = vars(vegetation_class), cols = vars(var_name),
+               scales = "free") +
+    scale_color_viridis(discrete = TRUE, option = "B", end = 0.5, direction = -1) +
+    scale_fill_viridis(discrete = TRUE, option = "B", end = 0.5, direction = -1) +
+    geom_text(data = ov_d, 
+              mapping = aes(x = value, y = density, label = overlap_char),
+              size = 2.5, inherit.aes = FALSE) +
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major.y = element_blank(),
+          strip.background.y = element_blank(),
+          strip.text.y = element_blank(),
+          
+          strip.background.x = element_rect(color = "white", fill = "white"),
+          strip.text.x = element_text(size = 7, color = "black"),
+          
+          legend.title = element_blank(),
+          legend.position = "none", 
+          axis.title.y = element_blank(),
+          axis.title.x = element_blank(),
+          axis.text.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          
+          axis.text.x = element_text(size = 8),
+          
+          plot.margin = unit(c(1, 1, 1, 1), "mm"))
+  # print(plist[[i]])
+}
+
+# add vegetation label at righmost plot:
+plist[[n_var]] <- plist[[n_var]] + 
+  theme(strip.background.y = element_rect(color = "white", fill = "white"),
+        strip.text.y = element_text(angle = 270, color = "black", size = 7))
+
+# add y axis name at leftmost plot
+plist[[1]] <- plist[[1]] + 
+  theme(axis.title.y = element_text(size = 10)) + 
+  ylab("Probability density")
+
+# Edit aspect labels
+plist[[4]] <- plist[[4]] + 
+  # scale_x_continuous(breaks = c(-270, -225, -180, -135, -90, -45, 0, 45, 90),
+  #                    labels = c("E", "SE", "S", "SW", "W", "NW", "N", "NE", "E"))
+  scale_x_continuous(breaks = c(-270, -180, -90, 0, 90),
+                     labels = c("E", "S", "W", "N", "E"))
+
+# Edit NDVI labels
+plist[[1]] <- plist[[1]] + 
+  scale_x_continuous(breaks = c(0, 0.5, 1))
+
+# Edit Elevation labels
+plist[[2]] <- plist[[2]] + 
+  scale_x_continuous(breaks = c(0, 1000, 2000))
+
+
+# plot to get legend
+
+veg_dist3 <- veg_dist2 + theme(legend.position = "bottom")
+leg <- ggpubr::get_legend(veg_dist3)
+
+# merge core plots
+dens_plots0 <- egg::ggarrange(
+  plist[[1]], plist[[2]], plist[[3]], plist[[4]], plist[[5]], plist[[6]],
+  ncol = n_var
+)
+
+# join with legend
+
+dens_plots_1 <- grid.arrange(dens_plots0, leg, nrow = 2, heights = c(20, 1))
+
+# ggsave("figures/Figure - spatial variables distributions by veg_reduced.png",
+#        plot = dens_plots_1,
+#        width = 17, height = 15, units = "cm")
+
+
+# (old plot) ----------------------------------------------------------------
+
+
+
+ggplot(densdata,#[densdata$var_name == var], 
          aes(x = value, y = density, ymin = 0, ymax = density,
              colour = class, fill = class)) + 
     geom_line(show.legend = F) + 
@@ -288,18 +489,18 @@ for(i in 1:n_var) {
     # facet_wrap(vars(variable), ncol = 3, scales = "free") +
     scale_color_viridis(discrete = TRUE, option = "B", end = 0.5, direction = -1) +
     scale_fill_viridis(discrete = TRUE, option = "B", end = 0.5, direction = -1) +
-    geom_text(data = ovlist[[i]], mapping = aes(x = value, y = density, 
-                                                label = overlap),
-              size = 4, inherit.aes = FALSE) +
+    # geom_text(data = overlap_data, mapping = aes(x = value, y = density, 
+    #                                              label = overlap_char),
+    #           size = 4, inherit.aes = FALSE) +
+    ggh4x::facet_grid2(rows = vars(vegetation_class), cols = vars(var_name),
+               scales = "free") + 
     theme(panel.grid.minor = element_blank(),
           legend.title = element_blank(),
           legend.position = "none", 
           axis.title.y = element_blank()) +
     xlab(var_names[i]) + 
     ylab("Probability density")
-  
-  # print(plot_list[[i]])
-}
+ 
 
 # Relabel aspect plot axis
 plot_list[[3]] <- plot_list[[3]] + 
@@ -309,6 +510,13 @@ plot_list[[3]] <- plot_list[[3]] +
 
 # Merge plots using egg approach
 # https://cran.r-project.org/web/packages/egg/vignettes/Overview.html
+
+# surv_plot <- egg::ggarrange(
+#   surv_marg + ggtitle("a"), 
+#   surv_alt + ggtitle("b"), 
+#   surv_dom + ggtitle("c"),
+#   ncol = 1
+# )
 
 joined_dens <- 
 ggarrange(plot_list[[1]], plot_list[[2]], plot_list[[3]],
@@ -487,6 +695,8 @@ fires_clipped <- do.call("rbind", lapply(1:nrow(fires_posgar), function(i) {
 burned_annual <- read.csv("data_burned_area_by_year.csv")
 
 
+
+# Fig. 7: -----------------------------------------------------------------
 # Burned area as a function of climate ------------------------------------
 
 
@@ -524,8 +734,20 @@ burned_annual_clim_long <- pivot_longer(
   names_to = "clim_var", values_to = "clim_value"
 )
 
+# better names for variables
+burned_annual_clim_long$clim_var2 <- plyr::revalue(
+  burned_annual_clim_long$clim_var,
+  replace = c(
+    "fwi" = "Fire Weather\nIndex",
+    "pp" = "Precipitation (mm)",
+    "temp" = "Temperature (°C)",
+    "vpd" = "Vapour pressure\ndeficit (kPa)"
+  )
+)
+
+
 clim_area <- 
-ggplot(burned_annual_clim_long, 
+ggplot(burned_annual_clim_long[burned_annual_clim_long$clim_var != "wind", ], 
        aes(x = clim_value, y = area_ha)) +
   geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs", k = 4),
               method.args = list(family = Gamma(link = "log")),
@@ -533,7 +755,7 @@ ggplot(burned_annual_clim_long,
               fill = viridis(1, begin = 0.2, option = "B"),
               alpha = 0.2, size = 0.8) +
   geom_point(shape = 19, alpha = 0.7, size = 2.5) + 
-  facet_wrap(vars(clim_var), scales = "free_x", ncol = 1) +
+  facet_wrap(vars(clim_var2), scales = "free_x", ncol = 1) +
   theme(panel.grid.minor = element_blank(),
         # remove strip
         strip.background = element_blank(),
@@ -545,7 +767,7 @@ ggplot(burned_annual_clim_long,
 clim_area
 
 clim_fires <- 
-  ggplot(burned_annual_clim_long, 
+  ggplot(burned_annual_clim_long[burned_annual_clim_long$clim_var != "wind", ], 
          aes(x = clim_value, y = fires)) +
   geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs", k = 4),
               method.args = list(family = mgcv::nb(link = "log")),
@@ -553,13 +775,56 @@ clim_fires <-
               fill = viridis(1, begin = 0.2, option = "B"),
               alpha = 0.2, size = 0.8) +
   geom_point(shape = 19, alpha = 0.7, size = 2.5) + 
-  facet_wrap(vars(clim_var), scales = "free_x", ncol = 1,
+  facet_wrap(vars(clim_var2), scales = "free_x", ncol = 1,
              strip.position = "right") +  
   theme(panel.grid.minor = element_blank(),
         strip.text.y = element_text(angle = 270)) +
   xlab("Climatic variable") + 
   ylab("Number of fires")
 clim_fires
+
+
+# clim vars in columns:
+
+clim_area <- 
+  ggplot(burned_annual_clim_long[burned_annual_clim_long$clim_var != "wind", ], 
+         aes(x = clim_value, y = area_ha)) +
+  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs", k = 4),
+              method.args = list(family = Gamma(link = "log")),
+              color = viridis(1, begin = 0.2, option = "B"),
+              fill = viridis(1, begin = 0.2, option = "B"),
+              alpha = 0.2, size = 0.8) +
+  geom_point(shape = 19, alpha = 0.7, size = 2.5) + 
+  facet_wrap(vars(clim_var2), scales = "free_x", nrow = 1) +
+  theme(panel.grid.minor = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()) +
+  xlab("Climatic variable") + 
+  ylab("Annual burned area (ha)") + 
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10 ^ x),
+                labels = trans_format("log10", math_format(10 ^ .x)))
+clim_area
+
+clim_fires <- 
+  ggplot(burned_annual_clim_long[burned_annual_clim_long$clim_var != "wind", ], 
+         aes(x = clim_value, y = fires)) +
+  geom_smooth(method = "gam", formula = y ~ s(x, bs = "cs", k = 4),
+              method.args = list(family = mgcv::nb(link = "log")),
+              color = viridis(1, begin = 0.2, option = "B"),
+              fill = viridis(1, begin = 0.2, option = "B"),
+              alpha = 0.2, size = 0.8) +
+  geom_point(shape = 19, alpha = 0.7, size = 2.5) + 
+  facet_wrap(vars(clim_var2), scales = "free_x", nrow = 1,
+             strip.position = "right") +  
+  theme(panel.grid.minor = element_blank(),
+        strip.text.y = element_blank(),
+        strip.background.x = element_blank(),
+        axis.title.x = element_blank()) +
+  xlab("Climatic variable") + 
+  ylab("Number of fires")
+clim_fires
+
 
 # con gg arrange (no anda bien el eje), con gridExtra no anda ggsave.
 
@@ -570,11 +835,19 @@ grid.arrange(arrangeGrob(clim_area + theme(axis.title.x = element_blank()),
                          clim_fires + theme(axis.title.x = element_blank()),
                          ncol = 2, widths = c(1, 1)),
              x_axis, nrow = 2, heights = c(10, 1))
-
 # jpeg(file = "figures/Figure - fire activity and climate interannual.jpeg",
 #      width = 12, height = 20, units = "cm", quality = 100,
 #      res = 900)
 # plot(clim_fig)
+# ---
+
+clim_fig <- ggarrange(clim_area, clim_fires, nrow = 2)
+ggsave("figures/Figure - fire activity and climate interannual.jpeg",
+       clim_fig,
+       width = 17, height = 11, units = "cm")
+
+
+
 # dev.off()
 
 
@@ -652,20 +925,115 @@ grid.arrange(arrangeGrob(clim_area + theme(axis.title.x = element_blank()),
 
 
 # write.csv(burned_annual_veg, "data_burned_area_year_veg.csv")
+# burned_annual_veg <- read.csv("data_burned_area_year_veg.csv")[, -1]
+
+
+
+# Fig S3: -----------------------------------------------------------------
+# Burned area as a function of climate (dynamic) by veg type --------------
+
+# bring fwi data
+fwi_data <- read.csv("data_climate_interannual_fwi.csv")
+fwi_data$date <- as.Date(fwi_data$date, format = "%Y-%m-%d")
+fwi_data$year <- format(fwi_data$date, format = "%Y") %>% as.numeric
+fwi_data$month <- format(fwi_data$date, format = "%m") %>% as.numeric
+fwi_data$fseason <- NA
+fwi_data$fseason <- fwi_data$year
+fwi_data$fseason[fwi_data$month == 12] <- fwi_data$year[fwi_data$month == 12] + 1
+
+fwi_agg <- aggregate(fwi ~ fseason, fwi_data[fwi_data$month %in% c(12, 1:3), ],
+                     FUN = mean)
+names(fwi_agg) <- c("year", "fwi")
+
+# remaining climatic variables
+climate_long <- read.csv("data_climate_interannual.csv")
+climate <- pivot_wider(climate_long[, c("variable", "value", "year")], 
+                       names_from = "variable", 
+                       values_from = "value")
+
+# merge with fwi
+climate <- cbind(climate[climate$year > 1998, ], fwi = fwi_agg$fwi)
+
+# Veg burned by year
 burned_annual_veg <- read.csv("data_burned_area_year_veg.csv")[, -1]
+burned_annual_veg$vegetation_class <- factor(burned_annual_veg$vegetation_class,
+                                             levels = veg_levels,
+                                             labels = veg_levels2)
+
+# View(burned_annual_veg)
 
 
+# merge
+bclim <- left_join(burned_annual_veg, 
+                   climate[, c("year", "pp", "temp", "fwi", "wind", "vpd")],
+                   by = "year")
+clim_vars <- c("pp", "temp", "fwi", "vpd")
+
+# repace zeroes by something positive
+bclim$area_ha[bclim$area_ha == 0] <- 0.001
+
+
+bclim_long <- pivot_longer(bclim,
+                           which(names(bclim) %in% clim_vars),
+                           names_to = "clim_var",
+                           values_to = "clim_value")
+
+unique(bclim_long$vegetation_class)
+unique(bclim_long$clim_var)
+bclim_long$clim_var <- factor(bclim_long$clim_var, 
+                              levels = c("fwi", "pp", "temp", "vpd"),
+                              labels = c(
+                                "Fire Weather\nIndex",
+                                "Precipitation (mm)",
+                                "Temperature (°C)",
+                                "Vapour pressure\ndeficit (kPa)"
+                              ))
+
+# Plots at log scale
+
+ddd <- bclim_long[!(bclim_long$vegetation_class %in% veg_levels2[c(3, 6, 8)]), ]
+
+options(scipen = 1) # remove scientific notation
+
+plot_clim_veg <-
+    ggplot(ddd, aes(x = clim_value, y = area_ha)) +
+    
+    geom_smooth(method = "gam", formula = y ~ s(x, k = 4),
+                method.args = list(), # family = Gamma(link = "log")
+                size = 0.3, alpha = 0.3,
+                color = viridis(1, begin = 0.2, option = "B"),
+                fill = viridis(1, begin = 0.2, option = "B")) +
+    
+    geom_point(shape = 19, alpha = 0.7, size = 2) + 
+    facet_grid(rows = vars(vegetation_class), 
+               cols = vars(clim_var), 
+               scales = "free") +
+    theme(legend.position = "none",
+          strip.text.y = element_text(angle = 270),
+          axis.title.x = element_blank(),
+          strip.text = element_text(size = 10)) +
+    scale_y_continuous(trans = "log10") +
+    ylab("Annual burned area (ha)")
+print(plot_clim_veg)
+
+# se podría mejorar el tema de la escala, pero ya me dio fiaca.
+# ggsave("figures/Figure - fire activity and climate interannual - by veg.jpeg",
+#        plot = plot_clim_veg,
+#        width = 17, height = 15, units = "cm")
+
+
+
+# Fig. 8 (S4, S5, S6): ----------------------------------------------------
 # Burn distribution as a function of climate ------------------------------
 
 
+burned_annual_veg <- read.csv("data_burned_area_year_veg.csv")[, -1]
+burned_annual_veg$vegetation_class <- factor(burned_annual_veg$vegetation_class,
+                                             levels = veg_levels,
+                                             labels = veg_levels2)
+
 burned_annual_veg_clim <- left_join(
   burned_annual_veg, climate, by = "year"  
-)
-
-# relabel vegetation
-burned_annual_veg_clim$vegetation_class <- factor(
-  burned_annual_veg_clim$vegetation_class, 
-  levels = veg_levels, labels = veg_levels2
 )
 
 # convert zeroes
@@ -674,15 +1042,13 @@ burned_annual_veg_clim$burn_distribution2 <-
 burned_annual_veg_clim$burn_distribution2[burned_annual_veg_clim$burn_distribution == 0] <- 1e-5
 burned_annual_veg_clim$burn_distribution2[burned_annual_veg_clim$burn_distribution == 1] <- 1 - 1e-5
 
-
-# Burn distribution (veg) ~ c(fwi, pp, temp) ------------------------------
-
-
+# data for brms
 brms_data <- pivot_wider(burned_annual_veg_clim[, c("vegetation_class", 
                                                     "burn_distribution2",
-                                                    "year", "fwi", "pp", "temp")], 
+                                                    "year", "fwi", "pp", "temp", "vpd")], 
                          names_from = "vegetation_class", 
                          values_from = "burn_distribution2")
+
 y_matrix <- brms_data[, veg_levels2[-8]] %>% as.matrix
 y_matrix <- apply(y_matrix, 1, normalize) %>% t
 brms_data$y_matrix <- y_matrix
@@ -697,17 +1063,19 @@ brms_data <- left_join(brms_data, burned_annual[, c("year", "area_ha")],
 # model because this one downweights extreme values in years with low burned 
 # area; the opposite occurs for subalpine forests).
 
-var_names <- c("fwi", "pp", "temp")
-var_labels <- c("Fire weather index (FWI)", "Precipitation (mm)", "Temperature (°C)")
+var_names <- c("fwi", "pp", "temp", "vpd")
+var_labels <- c("Fire weather index (FWI)", "Precipitation (mm)", 
+                "Temperature (°C)", "Vapour pressure deficit (kPa)")
 
-# for(i in 1:3) {
-i <- 2 # variar en 1 a 3
+# for(i in 2:3) {
+i <- 3 # variar en 1 a 4
 
 var_name <- var_names[i]
 var_label <- var_labels[i]
 var_breaks <- list(fwi = seq(8, 20, length.out = 4),
                    pp = seq(20, 260, length.out = 4),
-                   temp = 18:22)
+                   temp = 18:22,
+                   vpd = seq(0.7, 1, by = 0.1))
 var <- brms_data[, var_name, drop = TRUE]
 brms_data$var <- var
 
@@ -715,10 +1083,25 @@ pmodel_brms_d <- brm(bf(y_matrix ~ var, phi ~ log10(area_ha)),
                      data = brms_data, 
                      family = dirichlet(link = "logit", link_phi = "log"),
                      chains = 4, cores = 4)
+sss <- summary(pmodel_brms_d)
 
 print(paste("min ESS:",
             min(c(sss$fixed$Bulk_ESS, sss$fixed$Tail_ESS))))
 print(paste("max Rhat:", max(sss$fixed$Rhat)))
+
+# FWI:
+# [1] "min ESS: 1495.38546772707" [1] "max Rhat: 1.00202888697023"
+
+# PP:
+# [1] "min ESS: 1540.47792496047" [1] "max Rhat: 1.00332274770533"
+
+# TEMP: 
+# [1] "min ESS: 1250.48737573163" [1] "max Rhat: 1.00414138477285"
+ 
+# VPD:
+# [1] "min ESS: 1457.13913460967" [1] "max Rhat: 1.00334267448571"
+
+# saveRDS(pmodel_brms_d, paste("models/", "model_samples_",var_name, ".R", sep = "")) # no guardo, son fast
 
 nseq <- 150
 pdata_wide <- data.frame(row = 1:nseq,
@@ -829,16 +1212,16 @@ ggplot(p_ribbons, aes(x = var, ymin = p_lower, ymax = p_upper,
 veg_stack
 
 merged <- 
-ggarrange(veg_stack, vdist2, nrow = 2, heights = c(0.8, 1),
-          labels = c("A", "B"))
+ggpubr::ggarrange(veg_stack, vdist2, nrow = 2, heights = c(0.8, 1),
+                  labels = c("A", "B"))
 merged
 
 filename <- paste("figures/Figure - Proportion burned area by veg and ", 
                   var_name, ".jpeg", sep = "")
 ggsave(filename, merged,
-       units = "cm", dpi = 300, width = 17, height = 16)
+       units = "cm", dpi = 300, width = 17, height = 20)
 
-# }
+
   
 
 
@@ -1212,10 +1595,33 @@ ggsave("figures/Figure - spatial variables selectivity index.jpeg",
 
 
 
+# Fig 3: ------------------------------------------------------------------
 # Intraannual fire activity -----------------------------------------------
 
-remove <- which(fires_clipped@data$obs == "uncertain_year")
-dmonth <- fires_clipped@data[-remove, ]
+# get clipped fires database
+
+# fires_wgs <- readOGR("/home/ivan/Insync/Burned area mapping/patagonian_fires/patagonian_fires/patagonian_fires.shp")
+# study_area_wgs <- readOGR("/home/ivan/Insync/Burned area mapping/patagonian_fires/study_area/study_area.shp")
+# proj_posgar <- "+proj=tmerc +lat_0=-90 +lon_0=-72 +k=1 +x_0=1500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
+# fires_posgar <- spTransform(fires_wgs, proj_posgar)
+# sa_posgar <- spTransform(study_area_wgs, proj_posgar)
+# fires_clipped <- do.call("rbind", lapply(1:nrow(fires_posgar), function(i) {
+#   print(i)
+#   fire_clip <- gIntersection(polygons(fires_posgar[i, ]), polygons(sa_posgar))
+#   row.names(fire_clip) <- row.names(fires_posgar[i, ])
+#   fire_df <- SpatialPolygonsDataFrame(fire_clip, 
+#                                       data = fires_posgar@data[i, , drop = F])
+#   # recompute area
+#   fire_df$area_ha <- gArea(polygons(fire_clip)) * 0.0001 # m2 to ha
+#   
+#   return(fire_df)
+# }))
+# fires_clipped_data <- fires_clipped@data
+# write.csv(fires_clipped_data, "data_fires_clipped.csv")
+
+fires_clipped_data <- read.csv("data_fires_clipped.csv")[, -1]
+remove <- which(fires_clipped_data$obs == "uncertain_year")
+dmonth <- fires_clipped_data[-remove, ]
 dmonth$month_num <- format(as.Date(dmonth$date, format = "%Y-%m-%d"), 
                            format = "%m") %>% as.numeric
 dmonth$month <- factor(dmonth$month_num, levels = c(7:12, 1:6), 
@@ -1283,6 +1689,9 @@ dmonth$month <- factor(dmonth$month_num, levels = c(7:12, 1:6),
 ### Plot without annual values 
 
 # Average area and fire number by month
+
+sum_length <- function(x) c("sum" = sum(x), "length" = length(x))
+
 burned_monthly <- do.call("data.frame",
                           aggregate(area_ha ~ month_num + month, 
                                     data = dmonth,
@@ -1324,8 +1733,12 @@ clim_intra <- left_join(
 )
 
 # scale
-coef_clim <- max(clim_intra$value[clim_intra$variable == "prec"]) /
-  max(clim_intra$value[clim_intra$variable == "tavg"])
+
+# coef_clim <- max(clim_intra$value[clim_intra$variable == "prec"]) /
+#   max(clim_intra$value[clim_intra$variable == "tavg"])
+
+coef_clim <- 2
+
 
 clim_intra$y_scaled <- clim_intra$value
 clim_intra$y_scaled[clim_intra$variable == "tavg"] <- 
@@ -1346,7 +1759,7 @@ intra_clim <-
   scale_color_viridis(discrete = TRUE, option = "D", end = 0.5, direction = -1) +
   scale_fill_viridis(discrete = TRUE, option = "D", end = 0.5, direction = -1) +
   theme(legend.position = "right",
-        axis.title.y.left = element_text(vjust = 5),
+        # axis.title.y.left = element_text(vjust = 5),
         plot.margin = unit(c(2, 2, 2, 4), "mm")) + 
   xlab("Month") +
   scale_y_continuous(
@@ -1359,10 +1772,14 @@ intra_clim
 
 # merge
 
-ggarrange(intra_fire + theme(axis.title.x = element_blank()), 
-          intra_clim, ncol = 1, heights = c(0.93, 1))
-# ggsave("figures/Figure - intraannual fire activity.jpeg",
-#        width = 12, height = 13, dpi = 500, units = "cm")
+intra_fclim <- ggarrange(intra_fire + theme(axis.title.x = element_blank()) +
+                           ggtitle("A"), 
+                         intra_clim + 
+                           ggtitle("B"), 
+                         ncol = 1, heights = c(0.93, 1))
+ggsave("figures/Figure - intraannual fire activity.jpeg",
+       intra_fclim,
+       width = 12, height = 13, dpi = 300, units = "cm")
 
 
 
@@ -1395,19 +1812,42 @@ size_props
 # size_data$group <- rep(1:k, each = size)[1:nrow(size_data)]
 
 size_data$area_abs_log10 <- log10(size_data$area_abs)
-size_data$group <- cut(size_data$area_abs_log10, breaks = 15)
 
-mean_length <- function(x) c(mean = mean(x), length = length(x))
+# BAD approach (not acknowledging zeroes):
 
-size_bins <- do.call("data.frame", 
-                     aggregate(area_abs ~ group, size_data, mean_length))
+# size_data$group <- cut(size_data$area_abs_log10, breaks = 15)
+# mean_length <- function(x) c(mean = mean(x), length = length(x))
+# size_bins <- do.call("data.frame", 
+#                      aggregate(area_abs ~ group, size_data, mean_length))
 
 # acá falta agregar un bin que tenga freq = 13-5.
 # y además, no debería usar las medias si no las intermedias de cada clase. 
-size_bins$group
+
+k <- 10
+# size_limits <- seq(min(size_data$area_abs_log10), max(size_data$area_abs_log10),
+#                    length.out = k+1)
+size_limits <- seq(1, 4.5, length.out = k+1)
+
+size_data$size_class <- NA 
+
+for(i in 1:nrow(size_data)) {
+  #i = 3
+  cl <- as.numeric(size_data$area_abs_log10[i] > size_limits) %>% sum
+  size_data$size_class[i] <- cl
+}
+
+# aggregate
+mean_length <- function(x) c("mean" = mean(x), "length" = length(x))
+size_data_agg <- do.call("data.frame",
+                         aggregate(cbind(area_abs_log10, area_abs) ~ 
+                                     size_class, 
+                                   size_data, mean_length))
+size_data_agg
+
+size_data_agg$freq <- size_data_agg$area_abs.length / sum(size_data_agg$area_abs.length)
 
 size_freq <- 
-  ggplot(size_bins, aes(x = area_abs.mean, y = area_abs.length / nrow(size_data))) + 
+  ggplot(size_data_agg, aes(x = area_abs.mean, y = freq)) + 
   # geom_smooth(method = "glm", formula = y ~ log10(x), 
   #             method.args	= list(family = Gamma(link = "log"))) +
   geom_smooth(method = "lm", se = TRUE,
@@ -1418,9 +1858,47 @@ size_freq <-
   scale_y_continuous(trans = "log10") +
   scale_x_continuous(trans = "log10") +
   ylab("Relative frequency") + 
-  xlab("Area class (ha)")
+  xlab("Size class (ha)")
 size_freq
 
-ggarrange(size_props, size_freq, nrow = 1)
-ggsave("figures/Figure - fire size distribution.jpeg", 
+sizeplot <- ggarrange(size_props + ggtitle("A"), 
+                      size_freq + ggtitle("B"), 
+                      nrow = 1)
+ggsave("figures/Figure - fire size distribution.jpeg",
+       sizeplot,
        width = 17, height = 8.5, units = "cm", dpi = 300)
+
+
+
+# Burned area global results ----------------------------------------------
+
+dburn_freq <- read.csv("data_reburn_frequency.csv")[, -1]
+dburn_veg <- read.csv("data_burned_and_available_area_by_vegetation.csv")
+
+# Total burned area
+(burned_total_ha <- dburn_veg$area_burned_ha %>% sum)
+# 126593.8
+
+# Total burnable area
+(burnable_ha <- dburn_veg$area_available_ha[-1] %>% sum)
+
+# percentage burned 
+round(burned_total_ha / burnable_ha * 100, 2)
+# 5.77 %
+
+# reburn:
+options(scipen = 999)
+dburn_freq
+round(dburn_freq$prob * 100, digits = 2)
+
+# add row for freq = 0
+data_ex <- data.frame(fire_freq = 0, 
+                      area_ha = burnable_ha - burned_total_ha, 
+                      prob = NA)
+reburns <- rbind(data_ex, dburn_freq)
+reburns$prob <- reburns$area_ha / sum(reburns$area_ha)
+# cumsum(reburns$prob[6:1])
+
+fire_num_avg <- sum(reburns$fire_freq * reburns$prob)
+fire_annual_prob <- fire_num_avg / length(1999:2022)
+(fire_return <- 1 / fire_annual_prob)
