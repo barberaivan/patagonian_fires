@@ -209,7 +209,7 @@ veg_dist2 <- veg_dist +
 #        width = 17, height = 9, units = "cm", dpi = 300)
 
 
-# Fig 6: ------------------------------------------------------------------
+# Fig 6: -------------------------------------------------------------------
 # Densities and overlap by veg type -----------------------------------------
 
 var_names <- c("ndvi_max", 
@@ -429,7 +429,7 @@ for(i in 1:n_var) {
   # print(plist[[i]])
 }
 
-# add vegetation label at righmost plot:
+# add vegetation label at rightmost plot:
 plist[[n_var]] <- plist[[n_var]] + 
   theme(strip.background.y = element_rect(color = "white", fill = "white"),
         strip.text.y = element_text(angle = 270, color = "black", size = 7))
