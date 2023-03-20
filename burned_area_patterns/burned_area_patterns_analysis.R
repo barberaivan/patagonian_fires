@@ -8,6 +8,7 @@ library(viridis)
 # library(gtable)   # merge density plots
 library(grid)
 library(egg)      # has its own ggarrange! much better than ggpubr
+library(ggh4x)    # varying strip theme for veg_types and all together
 
 library(scales)   # log scale 
 library(circular) # density.circular, for aspect
@@ -141,6 +142,15 @@ veg_levels2 <- c("Wet forest",
                  "Steppe and\ngrassland",
                  # "Non burnable",
                  "All vegetation\ntypes")
+
+veg_levels3 <- c("All vegetation\ntypes", # this one first
+                 "Wet forest",
+                 "Subalpine\nforest",
+                 "Plantation",
+                 "Dry forest",
+                 "Shrubland",
+                 "Anthropogenic prairie\nand shrubland",
+                 "Steppe and\ngrassland")
 
 # Relabel available for burnable
 spatdata$class <- plyr::revalue(spatdata$class, replace = c("Available" = "Burnable"))
@@ -379,8 +389,11 @@ overlap_data$density[overlap_data$variable == "aspect"] <-
 # Make plots
 
 
-plist <- vector(mode = "list", length = n_var)
+# put first level "all veg types"
+densdata$vegetation_class <- factor(densdata$vegetation_class, levels = veg_levels3)
+overlap_data$vegetation_class <- factor(overlap_data$vegetation_class, levels = veg_levels3)
 
+plist <- vector(mode = "list", length = n_var)
 
 for(i in 1:n_var) {
   # i = 1
@@ -399,10 +412,10 @@ for(i in 1:n_var) {
                            colour = class, fill = class)) + 
     geom_line() + 
     geom_ribbon(alpha = 0.2, colour = NA) +
-    # geom_ribbon(alpha = 0.2, size = 0.4) +  
-    # geom_hline(yintercept = 0, colour = "white", size = 0.45, alpha = 1) +
+
     facet_grid(rows = vars(vegetation_class), cols = vars(var_name),
                scales = "free") +
+
     scale_color_viridis(discrete = TRUE, option = "B", end = 0.5, direction = -1) +
     scale_fill_viridis(discrete = TRUE, option = "B", end = 0.5, direction = -1) +
     geom_text(data = ov_d, 
@@ -410,6 +423,7 @@ for(i in 1:n_var) {
               size = 2.5, inherit.aes = FALSE) +
     theme(panel.grid.minor = element_blank(),
           panel.grid.major.y = element_blank(),
+          
           strip.background.y = element_blank(),
           strip.text.y = element_blank(),
           
@@ -418,8 +432,10 @@ for(i in 1:n_var) {
           
           legend.title = element_blank(),
           legend.position = "none", 
+          
           axis.title.y = element_blank(),
           axis.title.x = element_blank(),
+          
           axis.text.y = element_blank(),
           axis.ticks.y = element_blank(),
           
@@ -429,10 +445,23 @@ for(i in 1:n_var) {
   # print(plist[[i]])
 }
 
-# add vegetation label at rightmost plot:
+# add veg label in rightmost plot
+
+# (set varying strip themes for veg types)
+a <- element_text(face = "bold", colour = "white", angle = 270, size = 7)
+b <- element_text(colour = "black", angle = 270, size = 7)
+texts <- list(a, b, b, b, b, b)
+c <- element_rect(fill = "gray10", color = "gray10")
+d <- element_rect(fill = "white", color = "white")
+backgrounds <- list(c, d, d, d, d, d)
+
 plist[[n_var]] <- plist[[n_var]] + 
-  theme(strip.background.y = element_rect(color = "white", fill = "white"),
-        strip.text.y = element_text(angle = 270, color = "black", size = 7))
+  theme(strip.background.y = element_rect(),
+        strip.text.y = element_text()) +
+  facet_grid2(rows = vars(vegetation_class), cols = vars(var_name),
+              scales = "free",
+              strip = strip_themed(text_y = texts,
+                                   background_y = backgrounds))
 
 # add y axis name at leftmost plot
 plist[[1]] <- plist[[1]] + 
@@ -470,10 +499,9 @@ dens_plots0 <- egg::ggarrange(
 
 dens_plots_1 <- grid.arrange(dens_plots0, leg, nrow = 2, heights = c(20, 1))
 
-# ggsave("figures/Figure - spatial variables distributions by veg_reduced.png",
-#        plot = dens_plots_1,
-#        width = 17, height = 15, units = "cm")
-
+ggsave("figures/Figure - spatial variables distributions by veg_reduced.png",
+       plot = dens_plots_1,
+       width = 17, height = 15, units = "cm")
 
 # (old plot) ----------------------------------------------------------------
 
