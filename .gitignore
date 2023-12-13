@@ -1,5 +1,7 @@
-.Rproj.user
 .Rhistory
 .RData
 .Ruserdata
-burned_area_patterns
+*.tif
+*.rds
+burned_area_patterns/data_and_files/
+modis_hotspots/
