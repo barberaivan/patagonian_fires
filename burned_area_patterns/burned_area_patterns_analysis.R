@@ -850,9 +850,7 @@ for(i in 1:n_var) {
 
 # add veg label in rightmost plots (dist_roads and TPI)
 
-# (set varying strip themes for veg types)
-a <- element_text(face = "bold", colour = "white", angle = 270, size = 7)
-b <- element_text(colour = "black", angle = 270, size = 7)
+
 
 ## ATENTION this list must have length = length(veg_levels) - 2
 texts <- list(a, b, b, b, b, b, b)
