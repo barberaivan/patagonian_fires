@@ -3,5 +3,5 @@
 .Ruserdata
 *.tif
 *.rds
-burned_area_patterns/data_and_files/
+data_analyses/data_and_files/
 modis_hotspots/

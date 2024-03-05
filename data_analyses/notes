@@ -1,0 +1,4 @@
+por ahora el último codigo de fuego es el que dice
+varying NDVI at prediction.
+Ahí el NDVI se varía conjuntamente con las predictoras físicas, para mostrar el efecto
+total de las mismas, o sea, incluyendo su efecto mediado por NDVI.

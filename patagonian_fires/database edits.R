@@ -310,3 +310,36 @@ for(f in 1:nrow(v0)) {
 
 
 writeVector(v0, "patagonian_fires.shp", overwrite = TRUE)
+
+
+
+
+# En patagonian_fires faltan algunos incendios ----------------------------
+
+# como el de san ramón
+
+v1 <- vect("patagonian_fires.shp")
+v2 <- vect("backup files/patagonian_fires.shp")
+
+ids_not <- which(!(v2$fire_id %in% v1$fire_id))
+
+plot(v2[ids_not, ])
+v2[ids_not, ]$year
+v2[ids_not, ]$fire_id
+
+names(v2) %in% names(v1) # all names in v2 are in v1
+
+# get names from v1 absent from v2
+add_names <- names(v1)[!(names(v1) %in% names(v2))]
+v2$date_lr <- NA
+v2$date_ur <- NA
+v2$date_info <- NA
+
+# order names in v2
+v2 <- v2[, names(v1)]
+all(names(v2) == names(v1))
+
+# add missing fires to v1
+v3 <- rbind(v1, v2[ids_not, ])
+plot(v3)
+writeVector(v3, "patagonian_fires.shp", overwrite = T)
