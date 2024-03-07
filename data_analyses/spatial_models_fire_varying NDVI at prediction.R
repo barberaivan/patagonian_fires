@@ -96,6 +96,28 @@ r2bern <- function(p) {
 
 normalize <- function(x) x / sum(x)
 
+# function to compute something similar to a continuous weighted derivative,
+# but for a categorical predictor. It computes the average of the pairwise
+# differences in the response (y) across all pairs of given levels, but weighted
+# by the each pairs' probability. The weights of pairs are computed from the
+# marginal -unnormalized- weights (w), as a product. If weights are not given,
+# they are assumed constant.
+categorical_effect <- function(y, w = NULL) {
+
+  if(is.null(w)) w <- rep(1 / length(y), length(y))
+  w <- normalize(w)
+
+  # pairwise diff
+  ydiff <- outer(y, y, "-") %>% abs
+  wpairs <- outer(w, w, "*")
+
+  dvec <- ydiff[lower.tri(ydiff)]
+  wvec <- wpairs[lower.tri(wpairs)] %>% normalize
+
+  return(sum(dvec * wvec))
+}
+
+
 # Data --------------------------------------------------------------------
 
 v0 <- vect("data_and_files/data_spatial_variables_mindist_800m.shp")
@@ -345,6 +367,25 @@ names(props_dens)
 props_dens_long <- pivot_longer(props_dens, all_of(2:ncol(props_dens)),
                                 values_to = "p", names_to = "id")
 
+# Compute the categorical effect and p-value
+vegeff_marg <- categorical_effect(y = props_data$pobs * 100,
+                                  w = data_vd$veg_dist)
+vegeff_marg_sim <- sapply(1:ncol(dsim), function(j) {
+  categorical_effect(y = sim_prob[, j] * 100,
+                     w = data_vd$veg_dist)
+})
+vegeff_marg_pval <- 1 - ecdf(vegeff_marg_sim)(vegeff_marg)
+
+# put into a df
+effdata <- data.frame(
+  veg = "Shrubland",
+  y = 0.35,
+  text = paste(
+    format(round(vegeff_marg, 2), nsmall = 2), " % ",
+    "(", format(round(vegeff_marg_pval, 3), nsmall = 3), ")", sep = ""
+  )
+)
+
 veg_burn <-
 ggplot(props_dens_long, aes(x = vegetation_class, y = p)) +
   geom_violin(linewidth = 0.3, alpha = 0.2, fill = "black") +
@@ -435,11 +476,16 @@ veg_burn2 <-
   scale_color_viridis(discrete = T, option = "A", begin = 0.2,
                       guide = guide_legend(order = 1)) +
 
-
+  # individual p-values
   geom_text(data = props_data, mapping = aes(x = veg, y = max + 0.025,
-                                              label = p),
+                                             label = p),
              color = "gray10",
              inherit.aes = F, size = 2.5) +
+
+  # global effect
+  geom_text(data = effdata, mapping = aes(x = veg, y = y, label = text),
+            color = "gray10",
+            inherit.aes = F, size = 2.8) +
   ylab("Burn probability and\nrelative abundance (%)") +
   xlab("Vegetation type") +
   scale_y_continuous(labels = scales::label_percent(suffix = ""),
@@ -1349,19 +1395,56 @@ xbreaks <- list(
 xlabels <- xbreaks
 xlabels$aspect <- c("N", "E", "S", "W", "N")
 
+# factor to multiply derivatives y position
+deriv_yfac <- c(
+  "elevation" = 0.85,
+  "slope" = 0.85,
+  "aspect" = 0.15,
+  "TPI2k" = 0.85,
+  "ndvi_mean" = 0.85,
+  "pp" = 0.85,
+  "dist_human" = 0.85,
+  "dist_roads" = 0.85
+)
+
+deriv_xfac <- c(
+  "elevation" = 0.85,
+  "slope" = 0.85,
+  "aspect" = 0.85,
+  "TPI2k" = 0.35,
+  "ndvi_mean" = 0.2,
+  "pp" = 0.85,
+  "dist_human" = 0.85,
+  "dist_roads" = 0.85
+)
+
+# get mad by variable to standardize derivatives
+mads <- apply(as.matrix(data[, predictors]), 2, mad)
+sds <- apply(as.matrix(data[, predictors]), 2, sd)
+plot(mads ~ sds); abline(0, 1)
+
 P <- length(predictors)
 plist_multi <- vector("list", P)
 
 for(p in 1:P) {
-  # p = 1
+  # p = 8
   var <- predictors[p]
 
   # extract data from all vegs
   pred <- do.call("rbind", lapply(1:V, function(v) {
+    # observed predictions
     d <- firelist_cond[[v]]$pred
-    d <- d[d$varying_var == var, ]
+    ds <- firelist_cond[[v]]$pred_sim
+
+    rows_use <- d$varying_var == var
+
+    d <- d[rows_use, ]
+    ds <- ds[rows_use, ]
+
     d$vegetation_class <- veg_model[v]
-    return(d)
+    colnames(ds) <- paste("p_mle_sim_", 1:ncol(ds), sep = "")
+
+    return(cbind(d, ds))
   }))
 
   # extract density from the univariate firelist
@@ -1384,6 +1467,59 @@ for(p in 1:P) {
   dens_data$vegetation_class <- factor(dens_data$vegetation_class,
                                        levels = veg_model,
                                        labels = veg_model_num)
+
+  # compute derivatives with p-values
+  deriv_data <- do.call("rbind", lapply(1:V, function(i) {
+    # i = 1
+    cols_use <- grep("p_mle", colnames(pred))
+    remove <- grep("p_mle_f", colnames(pred))
+    cols_use <- cols_use[cols_use != remove]
+
+    dens_local <- dens_data[dens_data$vegetation_class == veg_model_num[i], ]
+    pred_local <- pred[pred$vegetation_class == veg_model_num[i], ]
+    pred_prob <- as.matrix(pred_local[, cols_use])
+
+    diff_p <- apply(pred_prob, 2, diff)
+    diff_x <- diff(pred_local$varying_val)
+    deriv_mat <- abs(diff_p / diff_x) * 100 * mads[p]
+    x_centres <- pred_local$varying_val[-1] - diff_x[1]
+
+    weights <- approx(dens_local$varying_val,
+                      dens_local$density,
+                      xout = x_centres, rule = 2)$y %>% normalize
+
+    derivs_avg <- colSums(deriv_mat * weights)
+    pval <- 1 - ecdf(derivs_avg[-1])(derivs_avg[1])
+
+    text_deriv <- paste(format(round(derivs_avg[1], 2), nsmall = 2), "%")
+    text_pval <- paste("(", format(round(pval, 3), nsmall = 3), ")", sep = "")
+    if(text_pval == "(0.000)") {
+      text_pval <- "(< 0.002)"
+    }
+
+    text <- paste(text_deriv, "\n", text_pval, sep = "")
+
+    res <- data.frame(deriv = derivs_avg[1],
+                      pval = pval,
+                      text = text,
+                      vegetation_class = veg_model_num[i])
+    return(res)
+  }))
+
+  # set position for deriv. Different computation because y starts alway at zero,
+  # but it varies in max between veg types
+  dxrange <- range(dens_data$varying_val)
+  x_deriv <- dxrange[1] + deriv_xfac[p] * (diff(dxrange))
+
+  max_y <- sapply(veg_model_num, function(v) {
+    yy <- c(pred$p_mle[pred$vegetation_class == v],
+            pred$upper95[pred$vegetation_class == v],
+            dens_data$density[dens_data$vegetation_class == v])
+    return(max(yy))
+  })
+
+  deriv_data$x <- x_deriv
+  deriv_data$y <- max_y * deriv_yfac[p]
 
   plotcito <-
     ggplot() +
@@ -1412,6 +1548,11 @@ for(p in 1:P) {
     geom_line(
       data = pred, mapping = aes(x = varying_val, y = p_mle),
       color = viridis(1, option = "A", begin = 0.2)
+    ) +
+    # deriv
+    geom_text(
+      data = deriv_data,
+      mapping = aes(x, y, label = text), size = 2.2, color = "gray10"
     ) +
 
     facet_wrap(vars(vegetation_class), ncol = 1, strip.position = "right",
@@ -1678,7 +1819,6 @@ rows_comp <- data$vegetation_class %in% veg_labels_sub
 data_comp <- data[rows_comp, ]
 nv <- veg_labels_sub %>% length
 
-
 modcomp <- bam(
   burned ~
     vegetation_class +
@@ -1844,32 +1984,32 @@ pd$pfit <- predict(modcomp, pd, "response")
 nsim <- ncol(dsim)
 pmat <- matrix(NA, nrow(pd), nsim)
 
-# fit model and get conditional probabilities
-modcomp_sim <- lapply(1:nsim, function(i) {
-
-  print(i)
-  dlocal <- data_comp
-  dlocal$burned <- dsim[rows_comp, i]
-
-  mmod <- bam(
-    burned ~
-      vegetation_class +
-      s(elevation, by = vegetation_class, k = 4, bs = "cr") +
-      s(slope, by = vegetation_class, k = 4, bs = "cr") +
-      s(aspect, by = vegetation_class, k = 4, bs = "cc") +
-      s(TPI2k, by = vegetation_class, k = 4, bs = "cr") +
-      s(pp, by = vegetation_class, k = 4, bs = "cr") +
-      s(ndvi_mean, by = vegetation_class, k = 4, bs = "cr") +
-      s(dist_human, by = vegetation_class, k = 4, bs = "cr") +
-      s(dist_roads, by = vegetation_class, k = 4, bs = "cr"),
-    knots = list(aspect = c(0, 360)),
-    family = "binomial", discrete = T, nthreads = 8,
-    data = dlocal
-  )
-
-  return(mmod)
-})
-saveRDS(modcomp_sim, "data_and_files/counterfactual_fire_models_sim_with_ndvi.rds")
+# # fit model and get conditional probabilities
+# modcomp_sim <- lapply(1:nsim, function(i) {
+#
+#   print(i)
+#   dlocal <- data_comp
+#   dlocal$burned <- dsim[rows_comp, i]
+#
+#   mmod <- bam(
+#     burned ~
+#       vegetation_class +
+#       s(elevation, by = vegetation_class, k = 4, bs = "cr") +
+#       s(slope, by = vegetation_class, k = 4, bs = "cr") +
+#       s(aspect, by = vegetation_class, k = 4, bs = "cc") +
+#       s(TPI2k, by = vegetation_class, k = 4, bs = "cr") +
+#       s(pp, by = vegetation_class, k = 4, bs = "cr") +
+#       s(ndvi_mean, by = vegetation_class, k = 4, bs = "cr") +
+#       s(dist_human, by = vegetation_class, k = 4, bs = "cr") +
+#       s(dist_roads, by = vegetation_class, k = 4, bs = "cr"),
+#     knots = list(aspect = c(0, 360)),
+#     family = "binomial", discrete = T, nthreads = 8,
+#     data = dlocal
+#   )
+#
+#   return(mmod)
+# })
+# saveRDS(modcomp_sim, "data_and_files/counterfactual_fire_models_sim_with_ndvi.rds")
 modcomp_sim <- readRDS("data_and_files/counterfactual_fire_models_sim_with_ndvi.rds")
 
 for(i in 1:nsim) {
@@ -1902,6 +2042,54 @@ panlabs$vegetation_class[panlabs$pp_class == "High"] <- "Steppe"
 panlabs$pfit <- 23.5
 panlabs$label <- c("C", "A", "D", "B")
 
+# Compute categorical effect at each condition
+vegeffs <- panlabs
+vegeffs$pfit <- 2.7
+vegeffs$eff <- NA
+vegeffs$pval <- NA
+vegeffs$text <- NA
+# import conditional vegetation model to estimate vegetation weights
+vegmod <- readRDS("data_and_files/vegetation_model_gam.rds")
+pd_uni <- pdobs[, c(predictors_env,
+                    "elevation_class", "pp_class", "elevation_tit", "pp_tit")]
+pd_uni <- pd_uni[!duplicated(pd_uni), ]
+vpred <- predict(vegmod, pd_uni, type = "response")
+
+# compute effects
+for(cond in 1:nrow(vegeffs)) {
+  # cond = 1
+  # get vegetation types at each condition
+  eee <- vegeffs$elevation_class[cond]
+  ppp <- vegeffs$pp_class[cond]
+  rows_focal <- pdobs$elevation_class == eee &
+                pdobs$pp_class == ppp &
+                pdobs$show == "yes"
+
+  pdsub <- pdobs[rows_focal, ]
+  pmat_sub <- pmat[rows_focal, ]
+
+  veg_ids <- which(veg_labels_sub %in% pdsub$vegetation_class)
+
+  w <- vpred[cond, veg_ids]
+
+  eff_obs <- categorical_effect(y = pdsub$pfit, w = w) * 100
+
+  # compute the effect across all simulations, for p-val
+  eff_sim <- sapply(1:ncol(pmat_sub), function(j) {
+    categorical_effect(y = pmat_sub[, j], w = w) * 100
+  })
+  pval <- 1 - ecdf(eff_sim)(eff_obs)
+
+  vegeffs$eff[cond] <- eff_obs
+  vegeffs$pval[cond] <- pval
+  vegeffs$text[cond] <- paste(
+    format(round(eff_obs, 2), nsmall = 2), " %\n",
+    "(", format(round(pval, 3), nsmall = 3), ")", sep = ""
+  )
+
+}
+
+
 # plot
 ggplot(pdobs[pdobs$show == "yes", ],
        aes(x = vegetation_class, y = pfit * 100,
@@ -1912,10 +2100,13 @@ ggplot(pdobs[pdobs$show == "yes", ],
 
   geom_bar(stat = "identity", width = 0.7, color = "black",
            alpha = 0.7, linewidth = 0.3) +
+
+  # p values
   geom_text(aes(x = vegetation_class, y = 22,#(pmax + 0.02) * 100,
                 label = pval), alpha = 0.85,
             data = pdobs[pdobs$show == "yes", ],
-            size = 3.1, inherit.aes = F) +
+            size = 2.8, inherit.aes = F) +
+
   # scale_fill_viridis(discrete = T, end = 0.9, option = "A") +
   scale_fill_viridis(option = "A", discrete = TRUE, end = 0.85) +
   # scale_fill_viridis(option = "C", discrete = TRUE, end = 0.85) +
@@ -1932,6 +2123,11 @@ ggplot(pdobs[pdobs$show == "yes", ],
   geom_label(aes(x = vegetation_class, y = pfit, label = label),
             data = panlabs,
             size = 4.2, inherit.aes = F) +
+
+  # effects
+  geom_text(aes(x = vegetation_class, y = pfit, label = text),
+            data = vegeffs, alpha = 0.85,
+            size = 2.8, inherit.aes = F) +
 
   facet_nested(rows = vars(elevation_tit, elevation_class),
                cols = vars(pp_tit, pp_class)) +
