@@ -1,6 +1,6 @@
 # (North-western) Patagonian fires
 
-Data and code for the article *Disentangling the effect of vegetation and physical drivers on fire*, submitted to Fire Ecology.
+Data and code for the article *Disentangling the effects of vegetation and physical drivers on fire*, submitted to Fire Ecology.
 
 The ```data_analyses``` folder contains all data and code to reproduce the results shown in the paper. The ```data_analyses/data``` and ```data_analyses/exports``` directories are not on GitHub for their large size. The complete database and exports are available [here](https://drive.google.com/drive/folders/1gVgHvqdG3YycCIS7TsJO3QXEtvV6_m6c).  
 
