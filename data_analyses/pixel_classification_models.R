@@ -82,7 +82,7 @@ library(viridis)
 library(ggpubr)
 library(gridExtra)
 
-train <- read.csv("pixel_classification_training_data.csv")
+train <- read.csv("data/pixel_classification_training_data.csv")
 names_to_change <- which(colnames(train) %in% c("nbr_delta", "nbr_min", "dnbr"))
 colnames(train)[names_to_change] # "dnbr"      "nbr_delta" "nbr_min"
 colnames(train)[names_to_change] <- c("dnbr_mean", "dnbr_min", "nbr_min")
@@ -365,7 +365,7 @@ ggarrange(plot1 +
           plot2 +
             theme(axis.text = element_text(size = 7)),
           nrow = 2)
-ggsave("figures/S01) pixel level classication.jpeg",
+ggsave("figures/S03) pixel level classication.jpeg",
        width = 16, height = 11, units = "cm", dpi = 300)
 
 

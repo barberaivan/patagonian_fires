@@ -10,9 +10,10 @@ library(ggh4x)    # varying strip theme for veg_types and all together
 library(scales)   # log scale
 library(lubridate)
 
-library(rgdal)    # readOGR
-library(rgeos)    # gIntersection, gArea...
-library(maptools) # UnionSpatialPolygons
+library(terra)
+# library(rgdal)    # readOGR
+# library(rgeos)    # gIntersection, gArea...
+# library(maptools) # UnionSpatialPolygons     ## all replaced by terra
 
 library(mgcv)
 library(scam)
@@ -81,11 +82,11 @@ theme_set(theme_mine())
 
 ## Prepare data
 
-burned_annual <- read.csv("data_and_files/data_burned_area_by_year.csv")
-burned_veg <- read.csv("data_and_files/data_burned_and_available_area_by_vegetation_dryforest2.csv")
+burned_annual <- read.csv("data/data_burned_area_by_year.csv")
+burned_veg <- read.csv("data/data_burned_and_available_area_by_vegetation_dryforest2.csv")
 
 # bring fwi data
-fwi_data <- read.csv("data_and_files/data_climate_interannual_fwi.csv")
+fwi_data <- read.csv("data/data_climate_interannual_fwi.csv")
 fwi_data$date <- as.Date(fwi_data$date, format = "%Y-%m-%d")
 fwi_data$year <- format(fwi_data$date, format = "%Y") %>% as.numeric
 fwi_data$month <- format(fwi_data$date, format = "%m") %>% as.numeric
@@ -98,7 +99,7 @@ fwi_agg <- aggregate(fwi ~ fseason, fwi_data[fwi_data$month %in% c(12, 1:3), ],
 names(fwi_agg) <- c("year", "fwi")
 
 # remaining climatic variables
-climate_long <- read.csv("data_and_files/data_climate_interannual.csv")
+climate_long <- read.csv("data/data_climate_interannual.csv")
 climate <- pivot_wider(climate_long[, c("variable", "value", "year")],
                        names_from = "variable",
                        values_from = "value")
@@ -537,7 +538,7 @@ coef_export <- cbind(
 
 # rownames(coef_export) <- coef_export$variable
 # coef_export[c("Burned area", "Number of fires"), ]$Estimate <- round(exp(coef_export[c("Burned area", "Number of fires"), ]$Estimate), 4)
-write.csv(coef_export, "data_and_files/trends.csv", row.names = F)
+write.csv(coef_export, "exports/trends.csv", row.names = F)
 
 
 # Theil-Sen regression (Thomas pide)
@@ -563,30 +564,17 @@ coef_table_ts <- rbind(
 
 # Intraannual fire activity -----------------------------------------------
 
-# get clipped fires database
 
-# fires_wgs <- readOGR("/home/ivan/Insync/Burned area mapping/patagonian_fires/patagonian_fires/patagonian_fires.shp")
-# study_area_wgs <- readOGR("/home/ivan/Insync/Burned area mapping/patagonian_fires/study_area/study_area.shp")
-# proj_posgar <- "+proj=tmerc +lat_0=-90 +lon_0=-72 +k=1 +x_0=1500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
-# fires_posgar <- spTransform(fires_wgs, proj_posgar)
-# sa_posgar <- spTransform(study_area_wgs, proj_posgar)
-# fires_clipped <- do.call("rbind", lapply(1:nrow(fires_posgar), function(i) {
-#   print(i)
-#   fire_clip <- gIntersection(polygons(fires_posgar[i, ]), polygons(sa_posgar))
-#   row.names(fire_clip) <- row.names(fires_posgar[i, ])
-#   fire_df <- SpatialPolygonsDataFrame(fire_clip,
-#                                       data = fires_posgar@data[i, , drop = F])
-#   # recompute area
-#   fire_df$area_ha <- gArea(polygons(fire_clip)) * 0.0001 # m2 to ha
-#
-#   return(fire_df)
-# }))
-# fires_clipped_data <- fires_clipped@data
-# write.csv(fires_clipped_data, "data_fires_clipped.csv")
+fires <- vect(file.path("..", "patagonian_fires/patagonian_fires.shp"))
+# # get clipped fires database (NOT USED)
+# study_area <- vect(file.path("..", "study_area/study_area.shp"))
+# fires_clipped <- crop(fires, study_area)
+# fires_clipped$area_ha <- expanse(fires_clipped, unit = "ha")
 
-fires_clipped_data <- read.csv("data_and_files/data_fires_clipped.csv")[, -1]
-remove <- which(fires_clipped_data$obs == "uncertain_year")
-dmonth <- fires_clipped_data[-remove, ]
+# DO NOT use clipped fires here
+fires_data <- as.data.frame(fires)
+remove <- which(fires_data$obs == "uncertain_year")
+dmonth <- fires_data[-remove, ]
 dmonth$month_num <- format(as.Date(dmonth$date, format = "%Y-%m-%d"),
                            format = "%m") %>% as.numeric
 dmonth$month <- factor(dmonth$month_num, levels = c(7:12, 1:6),
@@ -611,10 +599,13 @@ data_my <- left_join(ym,
                      data_my[, c("id", "fires")],
                      by = "id")
 data_my$fires[is.na(data_my$fires)] <- 0
+data_my$year_factor <- factor(data_my$year)
 
 # model
-m_count <- gam(fires ~ s(month_num, bs = "cc",
-                         k = length(unique(data_my$month_num))),
+m_count <- gam(fires ~
+                 s(month_num, bs = "cc",
+                   k = length(unique(data_my$month_num))) +
+                 s(year_factor, bs = "re"),
                data = data_my, family = nb(link = "log"),
                method = "REML", gamma = 1,
                knots = list(month_num = c(0, 12)))
@@ -631,11 +622,22 @@ count_data$date <- date_seq_focal
 
 # make continuous value for month
 month_pred <- data.frame(month_num = c(seq(7, 18,
-                                           length.out = length(date_seq))))
-pp <- predict(m_count, month_pred, se.fit = T)
-month_pred$count_mle <- exp(pp$fit)
-month_pred$count_lower <- exp(pp$fit - qnorm(0.975) * pp$se.fit)
-month_pred$count_upper <- exp(pp$fit + qnorm(0.975) * pp$se.fit)
+                                           length.out = length(date_seq))),
+                         year_factor = "1999")
+
+# compute prediction for an average year
+lpmat <- predict(m_count, month_pred, type = "lpmatrix")
+b <- coef(m_count)
+V <- vcov(m_count, unconditional = T)
+sigma_year <- gam.vcomp(m_count)["s(year_factor)", "std.dev"]
+pars_use <- c(1, grep("month_num", names(b)))
+bsim <- rmvn(10000, b, V)[, pars_use] %>% t
+mu_sim <- exp(lpmat[, pars_use] %*% bsim + 0.5 * sigma_year ^ 2)
+
+month_pred$count_mle <- exp(lpmat[, pars_use] %*% b[pars_use] +
+                            0.5 * sigma_year ^ 2)
+month_pred$count_lower <- apply(mu_sim, 1, quantile, 0.025)
+month_pred$count_upper <- apply(mu_sim, 1, quantile, 0.975)
 month_pred$date <- date_seq
 
 ggplot(month_pred, aes(x = date, y = count_mle,
@@ -655,18 +657,29 @@ size_data <- aggregate(area_ha ~ month_num + month, dmonth, mean)
 colnames(size_data)[3] <- "size"
 size_data$date <- date_seq_focal
 
+dmonth$year_factor <- factor(dmonth$year)
+
 # model fit to raw data
-m_size <- gam(area_ha ~ s(month_num, bs = "cc",
-                         k = length(unique(dmonth$month_num))),
+m_size <- gam(area_ha ~
+                s(month_num, bs = "cc",
+                  k = length(unique(dmonth$month_num))) +
+                s(year_factor, bs = "re"),
                data = dmonth, family = Gamma(link = "log"),
                method = "REML", gamma = 1,
                knots = list(month_num = c(0, 12)))
 
-# predict over the same values as for count
-pp <- predict(m_size, month_pred, se.fit = T)
-month_pred$size_mle <- exp(pp$fit)
-month_pred$size_lower <- exp(pp$fit - qnorm(0.975) * pp$se.fit)
-month_pred$size_upper <- exp(pp$fit + qnorm(0.975) * pp$se.fit)
+lpmat <- predict(m_size, month_pred, type = "lpmatrix")
+b <- coef(m_size)
+V <- vcov(m_size, unconditional = T)
+sigma_year <- gam.vcomp(m_size)["s(year_factor)", "std.dev"]
+pars_use <- c(1, grep("month_num", names(b)))
+bsim <- rmvn(10000, b, V)[, pars_use] %>% t
+mu_sim <- exp(lpmat[, pars_use] %*% bsim + 0.5 * sigma_year ^ 2)
+
+month_pred$size_mle <- exp(lpmat[, pars_use] %*% b[pars_use] +
+                           0.5 * sigma_year ^ 2)
+month_pred$size_lower <- apply(mu_sim, 1, quantile, 0.025)
+month_pred$size_upper <- apply(mu_sim, 1, quantile, 0.975)
 
 ggplot(month_pred, aes(x = date, y = size_mle,
                        ymin = size_lower, ymax = size_upper)) +
@@ -676,7 +689,6 @@ ggplot(month_pred, aes(x = date, y = size_mle,
   scale_x_date(labels = date_format("%b"),
                breaks = "1 month",
                minor_breaks = "1 month")
-
 
 # Merge both datasets and predictions, for count and size.
 # Count will be scaled, so that they can live in the same space.
@@ -706,9 +718,9 @@ names(ss) <- names(cc) <- nn
 pplong <- rbind(ss, cc)
 
 ddlong$var <- factor(ddlong$var, levels = c("size", "count"),
-                     labels = c("size", "number of fires"))
+                     labels = c("size", "n° fires"))
 pplong$var <- factor(pplong$var, levels = c("size", "count"),
-                     labels = c("size", "number of fires"))
+                     labels = c("size", "n° fires"))
 
 
 intra_fire <-
@@ -730,7 +742,7 @@ intra_fire <-
         axis.text.x = element_text(angle = 60, vjust = 0.5)) +
   scale_y_continuous(
     name = "Mean fire size (ha)",
-    sec.axis = sec_axis(~ . / q, name = "Mean number of fires")
+    sec.axis = sec_axis(~ . / q, name = "Mean n° of fires")
   )  +
   scale_x_date(labels = date_format("%b"),
                breaks = "1 month",
@@ -745,68 +757,50 @@ date_table <- data.frame(
   month = month(date_seq_focal)
 )
 
-# mean over the study area
-clim_intra <- read.csv("data_and_files/data_climate_monthly.csv")
+# mean over the study area, temperature from worldclim
+temp_intra <- read.csv("data/data_climate_monthly.csv")
+temp_intra <- temp_intra[temp_intra$variable == "tavg", ]
+names(temp_intra)[3] <- "mean"
+temp_intra$variable <- "temp"
+
+temp_intra_perc <- read.csv("data/data_climate_monthly_percentiles.csv")
+temp_intra_perc <- temp_intra_perc[order(temp_intra_perc$var), ]
+rows_temp_5 <- grep("tavg_p5$", temp_intra_perc$var)
+rows_temp_95 <- grep("tavg_p95$", temp_intra_perc$var)
+
+temp_intra$lower <- temp_intra_perc$value[rows_temp_5]
+temp_intra$upper <- temp_intra_perc$value[rows_temp_95]
+
+# bring precipitation from climatic atlas
+pp_intra <- read.csv("data/pp_atlas-climatico/data_climate_monthly_pp_with_percentiles_atlas.csv")
+pp_intra$variable <- "pp"
+pp_intra <- pp_intra[, c("month", "variable", "pp_mean", "pp_lower", "pp_upper")]
+names(pp_intra) <- names(temp_intra)
+
+clim_intra_0 <- rbind(temp_intra, pp_intra)
+
 clim_intra <- left_join(
-  clim_intra,
+  clim_intra_0,
   date_table,
   by = "month"
 )
-clim_intra$variable <- plyr::revalue(
-  clim_intra$variable,
-  c("prec" = "pp", "tavg" = "temp")
-)
-
-# percentiles data
-clim_intra_perc <- read.csv("data_and_files/data_climate_monthly_percentiles.csv")
-clim_intra_perc <- separate(clim_intra_perc, "var",
-                            into = c("month", "variable", "percentile"),
-                            sep = "_")
-clim_intra_perc$variable <- plyr::revalue(
-  clim_intra_perc$variable,
-  c("prec" = "pp", "tavg" = "temp")
-)
-clim_intra_perc$month <- as.numeric(clim_intra_perc$month)
-clim_intra_perc <- left_join(clim_intra_perc, date_table, by = "month")
-
 
 # scale for plot with 2 y-axes
 coef_clim <- 2
 
-clim_intra$y_scaled <- clim_intra$value
-clim_intra$y_scaled[clim_intra$variable == "temp"] <-
-  clim_intra$value[clim_intra$variable == "temp"] * coef_clim
+clim_intra_sc <- clim_intra
+rows_sc <- clim_intra$variable == "temp"
+cols_sc <- names(clim_intra) %in% c("mean", "lower", "upper")
 
-clim_intra_perc$y_scaled <- clim_intra_perc$value
-clim_intra_perc$y_scaled[clim_intra_perc$variable == "temp"] <-
-  clim_intra_perc$value[clim_intra_perc$variable == "temp"] * coef_clim
-
-# widenize by hand
-clim_intra_perc <- clim_intra_perc[order(clim_intra_perc$variable,
-                                         clim_intra_perc$date), ]
-ids <- !duplicated(clim_intra_perc[, c("variable", "date")])
-
-cperc_wide <- clim_intra_perc[ids, c("variable", "date")]
-cperc_wide$lower <- clim_intra_perc[clim_intra_perc$percentile == "p5",
-                                    "y_scaled"]
-cperc_wide$upper <- clim_intra_perc[clim_intra_perc$percentile == "p95",
-                                    "y_scaled"]
-
-maxtemp <- max(clim_intra_perc$value[clim_intra_perc$variable == "temp"])
+clim_intra_sc[rows_sc, cols_sc] <- clim_intra[rows_sc, cols_sc] * coef_clim
 
 intra_clim <-
-  ggplot() +
-  geom_ribbon(aes(x = date, ymin = lower, ymax = upper, fill = variable),
-              data = cperc_wide, color = NA, alpha = 0.3) +
-  geom_line(data = clim_intra,
-            mapping = aes(x = date, y = y_scaled,
-                          colour = variable,
-                          group = variable)) +
-  geom_point(data = clim_intra,
-             mapping = aes(x = date, y = y_scaled,
-                           colour = variable, shape = variable,
-                           group = variable),
-             size = 3, alpha = 0.7) +
+  ggplot(clim_intra_sc,
+         mapping = aes(date, mean, ymin = lower, ymax = upper,
+                       fill = variable, color = variable, group = variable)) +
+  geom_ribbon(color = NA, alpha = 0.3) +
+  geom_line() +
+  geom_point(size = 3, alpha = 0.7) +
   scale_color_viridis(discrete = TRUE, option = "D", end = 0.5, direction = -1) +
   scale_fill_viridis(discrete = TRUE, option = "D", end = 0.5, direction = -1) +
   theme(legend.position = "right",
@@ -824,13 +818,8 @@ intra_clim <-
 intra_clim
 
 # Fire size distribution
-
-fires_wgs <- readOGR("/home/ivan/Insync/patagonian_fires/patagonian_fires/patagonian_fires.shp")
-proj_posgar <- "+proj=tmerc +lat_0=-90 +lon_0=-72 +k=1 +x_0=1500000 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs"
-fires_posgar <- spTransform(fires_wgs, proj_posgar)
-
-size_data <- data.frame("area_abs" = fires_posgar$area_ha,
-                        "year" = fires_posgar$year)
+size_data <- data.frame("area_abs" = fires_data$area_ha,
+                        "year" = fires_data$year)
 
 size_data <- size_data[order(size_data$area_abs, decreasing = TRUE), , drop = F]
 size_data$area_prop <- cumsum(size_data$area_abs) / sum(size_data$area_abs)
@@ -850,12 +839,24 @@ size_props <-
 size_props
 
 # in which years occurred the fires burning 90 % of the burned?
-years_fires10p <- size_data$year[size_data$number_prop < 0.11] %>% unique
+# 10% of fires:
+
+row_lim <- which.min(abs(size_data$number_prop - 0.1))
+size_sub <- size_data[1:row_lim, ]
+# number of fires:
+nrow(size_sub)
+size_sub$year[order(size_sub$year)] %>% unique # years
+size_sub$year[order(size_sub$year)] %>% unique %>% length # 12 years
+size_sub$area_prop %>% max # 79 %
+
+# eitght largest
+size_data[1:8, ]
+
 years_fires10p[order(years_fires10p)]
+years_fires10p[order(years_fires10p)] %>% length # 12 years
+# and 50 %?
 years_fires_half_area <- size_data$year[size_data$area_prop <= 0.5] %>% unique
 years_fires_half_area
-
-
 
 # log-log plot
 
@@ -867,12 +868,15 @@ years_fires_half_area
 size_data$area_abs_log10 <- log10(size_data$area_abs)
 k <- 10
 size_limits <- seq(1, 4.5, length.out = k+1)
+# size_limits <- c(0, seq(1, 4.5, length.out = k+1))
 
 size_data$size_class <- NA
 
 for(i in 1:nrow(size_data)) {
   #i = 3
   cl <- as.numeric(size_data$area_abs_log10[i] > size_limits) %>% sum
+  # after clipping, there are fires < 10 ha, so we convert them to that class
+  if(cl == 0) cl <- 1
   size_data$size_class[i] <- cl
 }
 
@@ -898,7 +902,7 @@ size_freq <-
   scale_x_continuous(trans = "log10") +
   ylab("Relative frequency") +
   xlab("Size class (ha)")
-
+size_freq
 
 # fire regime plots
 
@@ -910,14 +914,14 @@ ggarrange(size_props + ggtitle("A"),
           intra_clim + theme(legend.position = "bottom") + ggtitle("D"),
           nrow = 2)
 
-ggsave("figures/03) size distribution and seasonality.jpeg",
+ggsave("figures/02) size distribution and seasonality_b.jpeg",
        size_season,
        width = 16, height = 14, units = "cm", dpi = 300)
 
 # Burned area global results ----------------------------------------------
 
-dburn_freq <- read.csv("data_and_files/data_reburn_frequency.csv")[, -1]
-dburn_veg <- read.csv("data_and_files/data_burned_and_available_area_by_vegetation.csv")
+dburn_freq <- read.csv("data/data_reburn_frequency.csv")[, -1]
+dburn_veg <- read.csv("data/data_burned_and_available_area_by_vegetation.csv")
 
 # Total burned area
 (burned_total_ha <- dburn_veg$area_burned_ha[-1] %>% sum)

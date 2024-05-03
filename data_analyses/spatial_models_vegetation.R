@@ -4,6 +4,7 @@ library(tidyverse); theme_set(theme_bw())
 library(viridis)
 library(terra)
 library(mgcv)
+library(HDInterval) # HDI
 
 library(grid)
 library(egg)      # has its own ggarrange! much better than ggpubr
@@ -58,7 +59,9 @@ mean_circular_deg <- function (x) { # takes angle in degrees
 }
 
 # function to make new data varying only one predictor.
-make_newdata <- function(varying = "elevation", data, l = 150) {
+# function to make new data varying only one predictor.
+make_newdata <- function(varying = "elevation", data, l = 150, HDI = TRUE,
+                         prob = 0.95) {
 
   var_names <- colnames(data)
 
@@ -68,9 +71,13 @@ make_newdata <- function(varying = "elevation", data, l = 150) {
       if(v == "aspect") {
         res <- mean_circular_deg(data[, v])
       }
-
     } else {
-      res <- seq(min(data[, v]), max(data[, v]), length.out = l)
+      if(HDI) {
+        hh <- hdi(data[, v], prob)
+        res <- seq(hh["lower"], hh["upper"], length.out = l)
+      } else {
+        res <- seq(min(data[, v]), max(data[, v]), length.out = l)
+      }
     }
     return(res)
   })
@@ -89,9 +96,12 @@ make_newdata <- function(varying = "elevation", data, l = 150) {
 
 # Data --------------------------------------------------------------------
 
-v0 <- vect("data_and_files/data_spatial_variables_mindist_800m.shp")
+v0 <- vect("data/data_spatial_variables_mindist_800m.shp")
+pp <- rast("data/pp_atlas-climatico/geonode_precipitacion_anual.tif")
+v2 <- extract(pp, v0)
+v0$pp <- v2$geonode_precipitacion_anual
 v <- project(v0, "EPSG:5343")
-
+v <- v[!is.na(v$pp), ]
 
 # Tidy data ---------------------------------------------------------------
 
@@ -108,7 +118,7 @@ d$dist_human <- d$dist_human / 1000
 d$dist_roads <- d$dist_roads / 1000
 
 # recode vegetation and remove unuseful categories
-burned_veg <- read.csv("data_and_files/data_burned_and_available_area_by_vegetation_dryforest2.csv")
+burned_veg <- read.csv("data/data_burned_and_available_area_by_vegetation_dryforest2.csv")
 d$vegetation_code <- d$vegetation
 
 # code dry forest A as subalpine forest
@@ -121,7 +131,7 @@ data <- left_join(d, burned_veg[, c("vegetation_code", "vegetation_class")],
                   by = "vegetation_code")
 
 data$vegetation_class[data$vegetation_class == "Dry forest B"] <- "Dry forest"
-data$vegetation_class[data$vegetation_class == "Steppe and grassland"] <- "Steppe"
+data$vegetation_class[data$vegetation_class == "Steppe and grassland"] <- "Grassland"
 data$vegetation_class[data$vegetation_class == "Anthropogenic prairie and shrubland"] <- "Anthropogenic prairie"
 
 unique(data$vegetation_class)
@@ -131,7 +141,7 @@ veg_levels <- c(
   "Subalpine forest",
   "Dry forest",
   "Shrubland",
-  "Steppe",
+  "Grassland",
   "Anthropogenic prairie",
   "Plantation"
 )
@@ -141,7 +151,7 @@ veg_labels <- c(
   "Subalpine\nforest",
   "Dry forest",
   "Shrubland",
-  "Steppe",
+  "Grassland",
   "Anthropogenic prairie",
   "Plantation"
 )
@@ -152,7 +162,7 @@ veg_levels_sub <- c(
   "Subalpine forest",
   "Dry forest",
   "Shrubland",
-  "Steppe"
+  "Grassland"
 )
 
 veg_labels_sub <- c(
@@ -160,7 +170,7 @@ veg_labels_sub <- c(
   "Subalpine\nforest",
   "Dry forest",
   "Shrubland",
-  "Steppe"
+  "Grassland"
 )
 
 
@@ -234,9 +244,9 @@ vegmod <- gam(
   knots = list(aspect = c(0, 360)),
   family = multinom(K = k), data = data_veg
 )
-saveRDS(vegmod, "data_and_files/vegetation_model_gam.rds")
+saveRDS(vegmod, "exports/vegetation_model_gam.rds")
 ## se toma su tiempo
-vegmod <- readRDS("data_and_files/vegetation_model_gam.rds")
+vegmod <- readRDS("exports/vegetation_model_gam.rds")
 
 # predictions
 
@@ -380,7 +390,7 @@ vegplot_leg <- grid.arrange(vegplot, leg, nrow = 2, heights = c(20, 2))
 # corr entre params?
 cc <- cov2cor(vcov(vegmod, unconditional = T))
 cc[lower.tri(cc)] %>% range
-cc[lower.tri(cc)] %>% hist(breaks = 30)
+# cc[lower.tri(cc)] %>% hist(breaks = 30)
 
 
 # r2 for conditional model
@@ -439,7 +449,7 @@ for(p in predictors) {
     knots = knots,
     family = multinom(K = k), data = dp
   )
-  mname <- paste("data_and_files/vegetation_model_gam", "_", p, ".rds", sep = "")
+  mname <- paste("exports/vegetation_model_gam", "_", p, ".rds", sep = "")
   saveRDS(vm, mname)
   vm <- readRDS(mname)
 
@@ -490,7 +500,7 @@ for(p in predictors) {
     linpred <- cbind(rep(0, np), lpmat %*% coef_mat)
     pred_arr[, , i] <- apply(linpred, 1, softmax) %>% t
   }
-  arrname <- paste("data_and_files/vegetation_model_gam_predictions_array_marg", "_", p, ".rds", sep = "")
+  arrname <- paste("exports/vegetation_model_gam_predictions_array_marg", "_", p, ".rds", sep = "")
   saveRDS(pred_arr, arrname)
   pred_arr <- readRDS(arrname)
 
@@ -634,7 +644,7 @@ fffull <- cbind(data.frame(Variable = "Multiple regression"),
                 as.data.frame(class_wise_r2_full_m))
 
 r2_export <- rbind(r2table_veg, fffull)
-write.csv(r2_export, "data_and_files/vegetation_models_r2.csv")
+write.csv(r2_export, "exports/vegetation_models_r2.csv")
 
 
 # Conditional predictions using focal mean --------------------------------
@@ -658,10 +668,17 @@ ndveg0 <- do.call("rbind", lapply(predictors, function(var) {
   do.call("rbind", lapply(veg_labels_sub, function(veg) {
     # make new data filtering vegetation and predictor
     ##  var = "elevation"; veg = "Shrubland" # test
-    nd <- make_newdata(
-      var,
-      data = data_veg[data_veg$vegetation_class == veg, predictors]
-    )
+
+    if(var != "aspect") {
+      nd <- make_newdata(var,
+                         data_veg[data_veg$vegetation_class == veg, predictors],
+                         HDI = TRUE, prob = 0.98)
+    } else {
+      nd <- make_newdata(var,
+                         data_veg[data_veg$vegetation_class == veg, predictors],
+                         HDI = FALSE)
+    }
+
     nd$focal_veg <- factor(veg, levels = veg_labels_sub)
     return(nd)
   }))
@@ -720,8 +737,8 @@ for(i in 1:nsim) {
 pred_ci <- apply(pred_arr, 1:2, ci)
 names(dimnames(pred_ci))[1] <- "summary"
 pred_ci <- aperm(pred_ci, c(2, 3, 1))
-saveRDS(pred_ci, "data_and_files/vegetation_pred_ci_conditional_focal.rds")
-pred_ci <- readRDS("data_and_files/vegetation_pred_ci_conditional_focal.rds")
+saveRDS(pred_ci, "exports/vegetation_pred_ci_conditional_focal.rds")
+pred_ci <- readRDS("exports/vegetation_pred_ci_conditional_focal.rds")
 
 # compute mle prediction
 prob_hat <- predict(vegmod, ndveg, type = "response")
@@ -739,6 +756,20 @@ for(v in 1:K) {
 
 # data for prediction
 pred_veg <- cbind(ndveg, as.data.frame(pred_focal))
+
+# x breaks for each predictor
+xbreaks <- list(
+  "elevation" = c(400, 1000, 1600),#c(500, 1000, 1500),
+  "slope" = c(0, 20, 40, 60),
+  "aspect" = c(0, 90, 180, 270, 360),
+  "TPI2k" = seq(0, 1, by = 0.5),#c(0, 0.5, 1),
+  "pp" = c(800, 1400, 2000),# seq(500, 2000, by = 500)#c(1000, 2000)
+  "dist_human" = c(0, 10, 20, 30),
+  "dist_roads" = c(0, 10, 20, 30)
+)
+xlabels <- xbreaks
+xlabels$aspect <- c("N", "E", "S", "W", "N")
+
 
 # plot
 P <- length(predictors)
@@ -828,15 +859,15 @@ for(i in 1:P) {
 
 vegplot_cond <- egg::ggarrange(plots = pl_cond, nrow = 2, ncol = 4)
 vegdens <- c(pl_dens[1:4], pl_cond[1:4], pl_dens[5:8], pl_cond[5:8])
-vegplot_cond_dens <- egg::ggarrange(plots = vegdens,
-                                    heights = c(0.35, 1, 0.35, 1),
-                                    nrow = 4, ncol = 4, draw = F)
-leg <- ggpubr::get_legend(pl_cond[[1]] + theme(legend.position = "bottom",
-                                               legend.title = element_blank(),
-                                               legend.text = element_text(size = 8),))
-
-p2 <- grid.arrange(vegplot_cond_dens, leg, nrow = 2,
-                                      heights = c(40, 2))
+# vegplot_cond_dens <- egg::ggarrange(plots = vegdens,
+#                                     heights = c(0.35, 1, 0.35, 1),
+#                                     nrow = 4, ncol = 4, draw = F)
+# leg <- ggpubr::get_legend(pl_cond[[1]] + theme(legend.position = "bottom",
+#                                                legend.title = element_blank(),
+#                                                legend.text = element_text(size = 8),))
+#
+# p2 <- grid.arrange(vegplot_cond_dens, leg, nrow = 2,
+#                                       heights = c(40, 2))
 
 # ggsave("figures/spatial patterns - veg as a function of fire drivers - cond focal with density.png",
 #        plot = p2,
@@ -887,7 +918,8 @@ for(i in 1:P) {
     scale_y_continuous(labels = scales::label_percent(suffix = ""),
                        limits = c(0, 1), expand = c(0.01, 0)) +
     scale_x_continuous(limits = c(min(data_veg[, vv]),
-                                  max(data_veg[, vv])))
+                                  max(data_veg[, vv])),
+                       breaks = xbreaks[[vv]])
   # pp
 
   # remove y axis in >1 column
@@ -919,9 +951,294 @@ ggsave("figures/S02) vegetation drivers conditional.png",
        plot = vegsep_dens,
        width = 24, height = 14, units = "cm")
 
-# Estos deberían hacerse en el rango del HDI 95, no min max. Va a cambiar mucho
-# para las distrib muy asimétricas, como distancias y ndvi.
+# Conditional predictions using focal mean - co-varying predictor ----------
 
+# Similar as above, but co-varying correlated predictors, based on the
+# topographic, distance and ndvi models fitted in the fire analyses script.
+# However, in the case of subalpine forests we use the global model for
+# topographic conditions. Otherwise, elevation would be predicted too high,
+# and we could not observe the effect of other predictors.
+
+# copy code from predictions above.
+nsim <- 10000
+K <- length(veg_labels_sub)
+
+# new data_veg for predictions.
+
+ndveg0 <- do.call("rbind", lapply(predictors, function(var) {
+  do.call("rbind", lapply(veg_labels_sub, function(veg) {
+    # make new data filtering vegetation and predictor
+    ##  var = "elevation"; veg = "Shrubland" # test
+
+    if(var != "aspect") {
+      nd <- make_newdata(var,
+                         data_veg[data_veg$vegetation_class == veg, predictors],
+                         HDI = TRUE, prob = 0.98)
+    } else {
+      nd <- make_newdata(var,
+                         data_veg[data_veg$vegetation_class == veg, predictors],
+                         HDI = FALSE)
+    }
+
+    nd$focal_veg <- factor(veg, levels = veg_labels_sub)
+    return(nd)
+  }))
+}))
+# nrow(ndveg0) # 150 * 8 * 5
+
+# change the reference elevation for subalpine forest, so its probabilities
+# can vary instead of being flat at 1.
+filt <- ndveg0$varying_var != "elevation" &
+  ndveg0$focal_veg == "Subalpine\nforest"
+ndveg0[filt, "elevation"] <- 1150 # it was 1322
+
+ndveg <- ndveg0
+
+
+# Edit newdata considering correlations.
+
+# Load required models for predictors
+mtopo <- readRDS("exports/models_topography.rds")
+mdist <- readRDS("exports/models_distances.rds")
+
+topo <- c("elevation", "slope", "TPI2k")
+distv <- predictors[grep("dist", predictors)]
+
+# combinations of topographic variables
+combs_topo <- expand.grid(response = topo, predictor = topo)
+combs_topo <- combs_topo[combs_topo$response != combs_topo$predictor, ]
+
+# models are fitted with vegetation class, not "focal veg"
+ndveg$vegetation_class <- ndveg$focal_veg
+
+for(veg in veg_labels_sub) {
+  # veg = "Shrubland"
+
+  # define model type for topography, using the global for subalpine.
+  model_type <- ifelse(veg == "Subalpine\nforest", "all", "veg")
+
+  # topography
+  for(predictor in topo) {
+    # predictor <- "elevation"
+    rr <- ndveg$varying_var == predictor & ndveg$focal_veg == veg
+    responses <- combs_topo$response[combs_topo$predictor == predictor]
+    for(response in responses) {
+      # response = "slope"
+      prediction <- predict(mtopo[[predictor]][[response]][[model_type]],
+                            newdata = ndveg[rr, ],
+                            type = "response")
+      ndveg[rr, response] <- prediction
+    }
+  }
+
+  # distances
+  for(predictor in distv) {
+    # predictor <- "dist_human"
+    rr <- ndveg$varying_var == predictor & ndveg$focal_veg == veg
+    response <- distv[distv != predictor]
+    prediction <- predict(mdist[[predictor]][[response]][["veg"]],
+                          newdata = ndveg[rr, ],
+                          type = "response")
+    ndveg[rr, response] <- prediction
+  }
+}
+
+# check
+# View(ndveg)
+
+# make linear predictor matrix:
+lpmat <- predict(vegmod, ndveg, type = "lpmatrix")
+lpmat <- lpmat[, 1:(ncol(lpmat) / k)] # all matrices are the same
+
+np <- nrow(ndveg)
+
+# create an array for simulated predicted probabilites.
+pred_arr <- array(NA, dim = c(np, K, nsim),   # it's an array with nsim tpm
+                  dimnames = list(
+                    case = 1:np,
+                    veg = 1:K,
+                    sim = 1:nsim
+                  ))
+
+set.seed(123)
+coef_samples <- rmvn(nsim, coef(vegmod),
+                     V = vcov(vegmod, unconditional = TRUE, freq = F)) %>% t
+
+for(i in 1:nsim) {
+  if(i %% 50 == 0) print(i)
+  # i = 1
+  # order the coefficients vector in matrix form. It enters by column, as the
+  # default for matrix()
+  # i = 1 # just to test the loop
+  coef_temp <- coef_samples[, i]
+  # turn potential Inf into something reasonable (exp(700) is finite, but a bit
+  # above return Inf and breaks the loop)
+  coef_temp[coef_temp > 700] <- 700
+
+  coef_mat <- matrix(coef_temp, ncol = k)
+  # add reference linear predictor
+  linpred <- cbind(rep(0, np), lpmat %*% coef_mat)
+  pred_arr[, , i] <- apply(linpred, 1, softmax) %>% t
+}
+
+# compute ci and longanize array:
+pred_ci <- apply(pred_arr, 1:2, ci)
+names(dimnames(pred_ci))[1] <- "summary"
+pred_ci <- aperm(pred_ci, c(2, 3, 1))
+saveRDS(pred_ci, "exports/vegetation_pred_ci_conditional_focal_cov.rds")
+pred_ci <- readRDS("exports/vegetation_pred_ci_conditional_focal_cov.rds")
+
+# compute mle prediction
+prob_hat <- predict(vegmod, ndveg, type = "response")
+
+# Select only the columns corresponding to the focal vegetation
+pred_focal <- matrix(NA, nrow(pred_ci), 3)
+colnames(pred_focal) <- c("p_lower", "p_upper", "p_mle")
+
+for(v in 1:K) {
+  # v = 2
+  rows <- ndveg$focal_veg == veg_labels_sub[v]
+  pred_focal[rows, 1:2] <- pred_ci[rows, v, ]
+  pred_focal[rows, 3] <- prob_hat[rows, v]
+}
+
+# data for prediction
+pred_veg <- cbind(ndveg, as.data.frame(pred_focal))
+
+# x breaks for each predictor
+xbreaks <- list(
+  "elevation" = c(400, 1000, 1600),#c(500, 1000, 1500),
+  "slope" = c(0, 20, 40, 60),
+  "aspect" = c(0, 90, 180, 270, 360),
+  "TPI2k" = seq(0, 1, by = 0.5),#c(0, 0.5, 1),
+  "pp" = c(800, 1400, 2000),# seq(500, 2000, by = 500)#c(1000, 2000)
+  "dist_human" = c(0, 10, 20, 30),
+  "dist_roads" = c(0, 10, 20, 30)
+)
+xlabels <- xbreaks
+xlabels$aspect <- c("N", "E", "S", "W", "N")
+
+
+# plot
+P <- length(predictors)
+pl_dens <- vector("list", P)
+
+# densities
+for(i in 1:P) {
+  # print(i)
+  # i = 1
+  vv <- predictors[i]
+  dp <- data.frame(x = data_veg[, vv])
+
+  dens <- density(dp$x, from = min(dp$x), to = max(dp$x), n = 2^10)
+  xseq <- seq(min(dp$x), max(dp$x), length.out = 150)
+  dens_approx <- approx(dens$x, dens$y, xout = xseq)
+  datadens <- data.frame(dens = dens_approx$y,
+                         x = xseq)
+
+  if(vv == "aspect") {
+    xc <- circular(dp$x, type = "angles", units = "degrees", template = "geographic")
+    dens <- density.circular(xc, bw = 10, n = 2 ^ 10)
+
+    # circular hace cosas raras: su seq, dens$x empieza en 90 y va decreciendo
+    # (gira a contrarreloj, donde el último número, cercano a 90, es -270 )
+    # Entonces, convertimos los números negativos a lo que son + 360.
+    densx_cor <- dens$x
+    densx_cor[dens$x < 0] <- dens$x[dens$x < 0] + 360
+    xseq <- seq(0, 360, length.out = 150)
+    dens_approx <- approx(densx_cor, dens$y, xout = xseq)
+    datadens <- data.frame(dens = dens_approx$y,
+                           x = xseq)
+  }
+
+  dplot <- ggplot(datadens, aes(x = x, y = dens, ymax = dens, ymin = 0)) +
+    geom_ribbon(color = NA, alpha = 0.05) +
+    geom_line(linewidth = 0.25, alpha = 0.7) +
+    theme_minimal() +
+    scale_x_continuous(limits = c(min(xseq), max(xseq))) +
+    theme(panel.grid = element_blank(),
+          axis.title = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank(),
+          plot.margin = margin(1, 0, -4, 0, "mm"))
+  # print(dplot)
+  pl_dens[[i]] <- dplot
+}
+
+pl_facet <- vector("list", P)
+
+for(i in 1:P) {
+  # i = 1
+  vv <- predictors[i]
+  dd <- pred_veg[pred_veg$varying_var == vv, ]
+
+  # compute means by veg type to in the plot
+  mmeans <- aggregate(data_veg[, vv] ~ vegetation_class, data_veg, mean)
+  names(mmeans) <- c("focal_veg", "x")
+  mmeans$veg_focal <- factor(mmeans$focal_veg, levels = veg_labels_sub)
+  # change reference value for elevation at subalpine forest
+  if(vv == "elevation") {
+    mmeans[mmeans$veg_focal == "Subalpine\nforest", "x"] <- 1150
+  }
+
+
+  pp <-
+    ggplot(dd, aes(y = p_mle, ymin = p_lower, ymax = p_upper,
+                   x = varying_val, group = focal_veg, color = focal_veg,
+                   fill = focal_veg)) +
+    # mean line
+    geom_vline(data = mmeans, aes(xintercept = x, color = focal_veg),
+               linewidth = 0.5, linetype = 3) +
+
+    # predictions
+    geom_ribbon(alpha = 0.4, color = NA) +
+    geom_line() +
+    scale_color_viridis(option = "A", discrete = TRUE, end = 0.8) +
+    scale_fill_viridis(option = "A", discrete = TRUE, end = 0.8) +
+    facet_wrap(vars(focal_veg), ncol = 1, strip.position = "right") +
+    theme(panel.grid.minor = element_blank(),
+          legend.position = "none",
+          axis.title = element_text(size = 9),
+          axis.text = element_text(size = 8),
+          strip.background = element_rect(fill = "white", color = "white")) +
+    xlab(names_frame$var_name[i]) +
+    # ylim(0, 100) +
+    ylab("Expected cover (%)") +
+    scale_y_continuous(labels = scales::label_percent(suffix = ""),
+                       limits = c(0, 1), expand = c(0.01, 0)) +
+    scale_x_continuous(limits = c(min(data_veg[, vv]),
+                                  max(data_veg[, vv])),
+                       breaks = xbreaks[[vv]])
+  # pp
+
+  # remove y axis in >1 column
+  if(i != 1) {
+    pp <- pp + theme(axis.title.y = element_blank(),
+                     axis.text.y = element_blank(),
+                     axis.ticks.y = element_blank())
+  }
+  if(i < P) {
+    pp <- pp + theme(strip.background = element_blank(),
+                     strip.text = element_blank())
+  }
+
+  # pp
+  if(vv == "aspect") {
+    pp <- pp + scale_x_continuous(breaks = c(0, 90, 180, 270, 360),
+                                  limits = c(0, 360),
+                                  labels = c("N", "E", "S", "W", "N"))
+  }
+
+  pl_facet[[i]] <- pp
+}
+
+vegsep <- egg::ggarrange(plots = pl_facet, ncol = P)
+vegsep_dens <- egg::ggarrange(plots = c(pl_dens, pl_facet), ncol = P, nrow = 2,
+                              heights = c(1, 7))
+
+ggsave("figures/S02) vegetation drivers conditional_cov.png",
+       plot = vegsep_dens,
+       width = 24, height = 14, units = "cm")
 
 # Ordination ---------------------------------------------------------------
 

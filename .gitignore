@@ -3,5 +3,7 @@
 .Ruserdata
 *.tif
 *.rds
-data_analyses/data_and_files/
+data_analyses/data/
+data_analyses/exports/
+data_analyses/backup files/
 modis_hotspots/
