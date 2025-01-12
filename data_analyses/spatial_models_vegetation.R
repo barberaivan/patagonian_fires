@@ -19,6 +19,8 @@ library(ggdensity) # geom_hdr
 
 softmax <- function(x) exp(x) / sum(exp(x)) # inverse multinomial-logit link
 
+normalize <- function(x) x / sum(x)
+
 # to compute mean and 95 % CI from samples.
 mean_ci <- function(x, name = "p_") {
   qs <- quantile(x, probs = c(0.025, 0.975), method = 8)
@@ -397,6 +399,12 @@ cc[lower.tri(cc)] %>% range
 fff <- apply(cbind(rep(0, nrow(data_veg)), fitted(vegmod)), 1, softmax) %>% t
 class_wise_r2_full <- apply(fff, 2, r2bern)
 
+# Overall r2 for full model (weighted average)
+veg_weights <- normalize(table(data_veg$vegetation_class))
+
+
+t(round(class_wise_r2_full * 100, 2)) %*% veg_weights
+# 43.73091
 
 # Vegetation univariate models --------------------------------------------
 

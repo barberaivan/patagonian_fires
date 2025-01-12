@@ -21,6 +21,25 @@ library(tidyterra)
 
 library(circular)
 
+
+# ggplot theme ------------------------------------------------------------
+
+nice_theme <- function() {
+  theme(
+    panel.border = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.grid.major =  element_line(),
+    
+    axis.line = element_line(linewidth = 0.35),
+    
+    axis.text = element_text(size = 9),
+    axis.title = element_text(size = 11),
+    
+    strip.text = element_text(size = 11),
+    strip.background = element_rect(fill = "white", color = "white")
+  )
+}
+
 # Functions ---------------------------------------------------------------
 
 softmax <- function(x) exp(x) / sum(exp(x)) # inverse multinomial-logit link
@@ -377,6 +396,12 @@ data_vd$vegetation_class <- factor(data_vd$vegetation_class, levels = veg_levels
                                    labels = veg_labels)
 data_vd$prop <- data_vd$area_burned_ha / data_vd$area_available_ha
 data_vd$veg_dist <- normalize(data_vd$area_available_ha)
+
+
+# Average burned proportion in real and simulated datasets ----------------
+
+hist(colMeans(dsim))
+abline(v = mean(data$burned))
 
 
 # Univariate fire models --------------------------------------------------
@@ -1236,7 +1261,7 @@ for(pred in distv) {
 
 # saveRDS(mdist, "exports/models_distances.rds")
 
-# Multivariate fire mixed models -------------------------------------------
+# Multivariate fire models -----------------------------------------------
 
 # Fit models to observed data
 # use the same smoothing parameter across vegetation types, but varying across
@@ -2219,8 +2244,6 @@ veg_marg <-
          shape = guide_legend(order = 2))
 veg_marg
 
-
-
 effdata2 <- effdata
 effdata2$veg <- 1
 effdata2$y <- 0.175
@@ -2232,6 +2255,9 @@ fill_colors <- c(
 )
 
 # Vegetation marginal -----------------------------------------------------
+
+props_data2 <- props_data
+names(props_data)[1] <- "vegetation_class"
 
 veg_marg2 <-
   ggplot() +
@@ -2269,292 +2295,294 @@ veg_marg2 <-
         axis.title.x = element_blank(),
         plot.title = element_text(hjust = -0.05),
         legend.position = "none",
-        plot.margin = margin(2, 2, 4, 2, "mm")) +
+        plot.margin = margin(2, 2, 4, 2, "mm"),
+        text = element_text(family = "Arial")) +
   guides(colour = guide_legend(order = 1),
          shape = guide_legend(order = 2))
 veg_marg2
 
 
+# Vegetation distribution (torta) -----------------------------------------
 
-# Burn prob ~ vegetation, conditional -------------------------------------
+veg_dist <-
+  ggplot(data_vd, aes(x = "", y = veg_dist, fill = vegetation_class)) +
+  scale_fill_manual(values = fill_colors) +
+  geom_bar(stat = "identity", width = 1,
+           alpha = 0.7, linewidth = 0.3, color = "black") +
+  coord_polar("y", start = 0) +
+  labs(tag = "B",
+       title = "Relative abundance\nin the landscape") +
+  theme(panel.grid = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        legend.position = "none",
+        plot.title.position = "panel",
+        plot.title = element_text(vjust = 0, hjust = 0.5, size = 9),
+        panel.border = element_blank(),
+        text = element_text(family = "Arial"))
+veg_dist
 
-predictors_env <- predictors[predictors != "ndvi_mean"]
 
-#summary(ndvi_model)
+# Comparing vegetation types while controlling environment -----------------
 
-# get means to compare. As pp and elevation have high effects on vegetation types,
-# a common value is unrealistic, so we make 2 conditions: low and high.
-# The constrain for each common value is that they must not be outside the
-# [0.15, 0.85] percentiles in the remaining communities
-# (after removing the extreme).
-qq <- aggregate(cbind(pp, elevation) ~ vegetation_class, data_comp, quantile,
-                probs = c(0.15, 0.85), method = 8)
+# As vegetation types interact with physical variables, comparing them in 
+# a single point may no be very representative of their differences. 
+# Here I compute a Partial Prediction Plot for the vegetation effect, which
+# marginalises over the remaining predictors. However, to avoid the problem
+# of the correlation among vegetation and environment, I subset the data in 
+# four combinations of high and low elevation and precipitation. Those four 
+# subsets are tanken as the distribution of the environment, and the 
+# predictions of burn probability will be marginal to those 4 distributions.
+# This can be thought of as a partitioned partial dependence plot.
 
-concensus <- function(x) { # get consensus when col 1 is the lower and col 2 is the upper
-  # x <- qq$pp
-  x <- x[, grep("15|85", colnames(x))]
-  colnames(x) <- c("min", "max")
-  # find communities from the extremes
-  id_lower <- which.min(x[, "max"])
-  id_upper <- which.max(x[, "min"])
+data_veg$elev_class <- NA
+data_veg$pp_class <- NA
 
-  # find who may live with the extremes.
-  neigh_lower <- which(x[, "min"] <= x[id_lower, "max"])
-  neigh_upper <- which(x[, "max"] >= x[id_upper, "min"])
+filter_elev_low <- data_veg$elevation >= 500 & data_veg$elevation < 900
+filter_elev_high <- data_veg$elevation >= 900 & data_veg$elevation < 1300
+data_veg$elev_class[filter_elev_low] <- "elev_low"#"Low: [500, 900) m a.s.l."
+data_veg$elev_class[filter_elev_high] <- "elev_high"#High: [900, 1300) m a.s.l."
 
-  low_val <- mean(c(min(x[neigh_lower, "max"]), max(x[neigh_lower, "min"])))
-  high_val <- mean(c(min(x[neigh_upper, "max"]), max(x[neigh_upper, "min"])))
+filter_pp_low <- data_veg$pp >= 750 & data_veg$pp < 1000
+filter_pp_high <- data_veg$pp >= 1000 & data_veg$pp < 1500
+data_veg$pp_class[filter_pp_low] <- "pp_low"#"Low: [750, 1000) mm"
+data_veg$pp_class[filter_pp_high] <- "pp_high"#"High: [1000, 1500) mm"
 
-  return(c(low_val, high_val))
+# subset data in those ranges
+
+datasub <- data_veg[!is.na(data_veg$elev_class) &
+                      !is.na(data_veg$pp_class), ]
+
+table(datasub$elev_class, datasub$pp_class, datasub$vegetation_class)
+# OK
+
+datasub$envir <- paste(datasub$elev_class, datasub$pp_class, sep = "/")
+envirs <- unique(datasub$envir)
+datasub$envir <- factor(datasub$envir, levels = envirs)
+
+# Communities in each environment
+envir_table <- data.frame(
+  "elev_high/pp_high" = c("Wet forest", "Subalpine\nforest", "Shrubland"),
+  "elev_low/pp_low" = c("Dry forest", "Shrubland", "Grassland"),  
+  "elev_high/pp_low" = c("Subalpine\nforest", "Shrubland", "Grassland"),
+  "elev_low/pp_high"  = c("Wet forest", "Dry forest", "Shrubland")
+)
+
+# proportion of each vegetation type within each environment, 
+# to compute weighted average and effect size
+envir_prop <- envir_table
+for(e in 1:4) {
+  # e = 1
+  tabb <- table(datasub$vegetation_class[datasub$envir == envirs[e]])
+  props <- normalize(tabb[envir_table[, e]])
+  envir_prop[, e] <- props
 }
 
-# table to show means
-veg_means <- aggregate(as.matrix(data_comp[, predictors_env]) ~ vegetation_class,
-                       data_comp, mean)
-veg_means$aspect <- aggregate(aspect ~ vegetation_class,
-                              data_comp, mean_circular_deg)[, "aspect"]
-global_means <- lapply(veg_means[, -1], function(x) mean(x))
-global_means$aspect <- mean_circular_deg(veg_means$aspect)
-
-# make values to predict (replace global_means for pp and elevation)
-ref_values <- global_means
-ref_values$pp <- concensus(qq$pp)
-ref_values$elevation <- concensus(qq$elevation)
-
-# for dist_roads, use the median, so it's not so extreme for dry forests
-ref_values$dist_roads <- median(veg_means$dist_roads, method = 8)
-
-# compare this values with slope and TPI being predicted by elevation
-ref_values2 <- ref_values
-
-ref_values2$slope <- predict(mtopo[["elevation"]][["slope"]][["all"]],
-                             data.frame(elevation = ref_values$elevation),
-                             type = "response") %>% as.numeric
-ref_values2$TPI2k <- predict(mtopo[["elevation"]][["TPI2k"]][["all"]],
-                             data.frame(elevation = ref_values$elevation),
-                             type = "response") %>% as.numeric
-
-names1 <- rep(names(ref_values), sapply(ref_values, length))
-names2 <- rep(names(ref_values2), sapply(ref_values2, length))
-
-# check visually:
-ref_df <- data.frame(val = c(do.call("c", ref_values),
-                             do.call("c", ref_values2)),
-                     var = c(names1, names2),
-                     group = rep(c("fixed", "cov"),
-                                 c(length(names1), length(names2))))
-
-data_comp_long <- pivot_longer(
-  data_comp, all_of(which(names(data_comp) %in% predictors_env)),
-  names_to = "var", values_to = "val"
-)
-data_comp_long$vari <- factor(data_comp_long$var,
-                              levels = names_frame$variable[-5],
-                              labels = names_frame$name2[-5])
-ref_df$vari <- factor(ref_df$var,
-                      levels = names_frame$variable[-5],
-                      labels = names_frame$name2[-5])
-
-# ggplot(data_comp_long, aes(x = val, fill = vegetation_class, color = vegetation_class)) +
-#   geom_density(alpha = 0.25) +
-#   scale_color_viridis(option = "A", discrete = TRUE, end = 0.95) +
-#   scale_fill_viridis(option = "A", discrete = TRUE, end = 0.95) +
-#
-#   # ggnewscale::new_scale_color() +
-#   geom_vline(data = ref_df, mapping = aes(xintercept = val,
-#                                           linetype = group, group = group),
-#              linewidth = 0.3,
-#              show.legend = F) +
-#   scale_linetype_manual(values = c("dotted", "dashed")) +
-#
-#   facet_wrap(vars(vari), scales = "free", nrow = 2,
-#              strip.position = "bottom") +
-#   theme(legend.position = c(0.88, 0.23),
-#         legend.title = element_blank(),
-#         axis.ticks.y = element_blank(),
-#         axis.text.y = element_blank(),
-#         axis.title.x = element_blank(),
-#         strip.placement = "outside",
-#         strip.background = element_rect(color = "white", fill = "white"),
-#         strip.text = element_text(vjust = 1),
-#         panel.spacing.y = unit(4, "mm"),
-#         panel.grid.minor = element_blank())
-#
-# ggsave("figures/XX predictors densities by veg type_cov-topo.png",
-#        width = 16, height = 13, units = "cm")
-
-# newdata to predict
-vars_unique <- ref_values2 # choose: 2 co-varies topography, ref_values, not.
-vars_unique$vegetation_class <- veg_labels_sub
-pd <- expand.grid(vars_unique)
-
-# remove combinations that should not exist
-out <- (
-         pd$elevation == ref_values2$elevation[1] &
-         (
-           pd$slope == ref_values2$slope[2] |
-           pd$TPI2k == ref_values2$TPI2k[2]
-         )
-       ) |
-       (
-         pd$elevation == ref_values2$elevation[2] &
-         (
-           pd$slope == ref_values2$slope[1] |
-           pd$TPI2k == ref_values2$TPI2k[1]
-         )
-       )
-pd <- pd[!out, ]
-
-# # write values:
-# write.csv(pd[pd$vegetation_class == "Shrubland", predictors_env],
-#           "exports/common_environment_values_used_cov-topo.csv",
-#           row.names = F)
-
-# Here, use the NDVI model to predict NDVI at these environments
-pd$ndvi_mean <- predict(ndvi_models$veg, pd, type = "response")
-
-pd$elevation_class <- factor(
-  ifelse(pd$elevation == min(pd$elevation), "Low", "High"),
-  levels = c("High", "Low")
-)
-
-pd$pp_class <- factor(
-  ifelse(pd$pp == min(pd$pp), "Low", "High"),
-  levels = c("Low", "High")
-)
-
-pd$show <- factor(
-  ifelse(
-    (pd$vegetation_class == "Grassland" & pd$pp_class == "High") |
-    (pd$vegetation_class == "Wet forest" & pd$pp_class == "Low") |
-    (pd$vegetation_class == "Subalpine\nforest" & pd$elevation_class == "Low") |
-    (pd$vegetation_class == "Dry forest" & pd$elevation_class == "High"),
-    "no", "yes"),
-  levels = c("yes", "no")
-)
-
-pd$pfit <- predict(fire_models_obs$veg, pd, "response")
-
-# compute predictions from randomized fires, to compare all predictions with
-# chance
-nsim <- ncol(dsim)
-pmat <- matrix(NA, nrow(pd), nsim)
-for(i in 1:nsim) {
-  pmat[, i] <- predict(fire_models_sim$veg[[i]], pd, "response")
-}
-
-pd$pval <- sapply(1:nrow(pd), function(i) {
-  pcum <- ecdf(pmat[i, ])(pd$pfit[i])
-  pval <- ifelse(pcum < 0.5, pcum * 2, (1 - pcum) * 2)
+pdata_env <- lapply(1:4, function(e) {
+  datalocal0 <- datasub[datasub$envir == envirs[e], ]
+  datalocal <- datalocal0[datalocal0$vegetation_class %in% envir_table[, e], ]
+  return(datalocal[, c("vegetation_class", predictors)])
 })
-pd$pval <- format(round(pd$pval, 3), nsmall = 3)
 
-# make titles as nested facets
-pd$elevation_tit <- "Elevation"
-pd$pp_tit <- "Precipitation"
+names(pdata_env) <- envirs
+# lapply(pdata_env, function(x) unique(x$vegetation_class))
 
-# bring the observed points
+# Create a prediction list with the 4 envirs. Each environment will have a 
+# prediction table, with the predicted probs, observed marginal probs, 
+# and p-values. 
+# In addition, they will have the effect size and its p-value, in a separate
+# (1-row) df.
+
 names(props_data)[1] <- "vegetation_class"
-pdobs <- left_join(pd, props_data[, 1:2], by = "vegetation_class")
+nsim <- ncol(dsim)
+np <- nrow(envir_table)
 
-# get max probability to label pvalue
-pdobs$pmax <- apply(as.matrix(pdobs[, c("pfit", "pobs")]), 1, max)
+predlist <- lapprops_data2predlist <- lapply(1:4, function(e) {
+  # e = 1
+  print(e)
+  ptable <- data.frame(
+    vegetation_class = factor(envir_table[, e], levels = veg_labels_sub),
+    pfit = NA,
+    pval = NA,
+    envir = envirs[e]
+  )
+  
+  # bring marginal burn prob
+  ptable <- left_join(ptable, props_data, by = "vegetation_class")  
+  
+  # table to fill with pfit distribution under null models
+  pfit_sim <- matrix(NA, np, nsim)
+  
+  # Expand prediction data
+  pdata_local <- do.call("rbind", lapply(1:np, function(v) {
+    ppp <- pdata_env[[e]]
+    ppp$vegetation_class <- factor(ptable$vegetation_class[v], 
+                                   levels = veg_labels_sub)
+    
+    # predict NDVI for each veg type separately
+    ppp$ndvi <- predict(ndvi_models$veg, ppp, type = "response")
+    return(ppp)
+  }))
+  
+  # predict and aggregate with observed model
+  pfit_all <- predict(fire_models_obs$veg, pdata_local, type = "response")
+  pfit_means <- tapply(pfit_all, pdata_local$vegetation_class, mean)
+  ptable$pfit <- pfit_means[!is.na(pfit_means)] 
+  
+  # Predictions from null models
+  psim_all <- sapply(1:nsim, function(i) {
+    predict(fire_models_sim$veg[[i]], pdata_local, type = "response")
+  })
+  
+  psim_means <- aggregate(psim_all ~ vegetation_class, pdata_local, mean)[, -1] |> as.matrix()
+  
+  # The p-value for each vegetation type is the p-value for the difference between
+  # the weighted average of burn probs across veg types and its value. 
+  fitted_mean <- as.numeric(t(ptable$pfit) %*% envir_prop[, e])
+  # diff_obs <- abs(ptable$pfit - fitted_mean)
+  diff_obs <- ptable$pfit - fitted_mean
+  
+  #diff_sim <- abs(t(psim_means) - as.numeric(t(psim_means) %*% envir_prop[, e]))
+  diff_sim <- t(psim_means) - as.numeric(t(psim_means) %*% envir_prop[, e])
+  
+  # ptable$pval <- sapply(1:3, function(v) {
+  #   distrib <- ecdf(diff_sim[, v])
+  #   return(1 - distrib(diff_obs[v]))
+  # })
+  ## Two-tailed p-value:
+  ptable$pval <- sapply(1:3, function(v) {
+    distrib <- ecdf(diff_sim[, v])
+    perc <- distrib(diff_obs[v])
+    p <- ifelse(perc >= 0.5, 2 * (1 - perc), 2 * perc)
+  })
+  
+  # Effect size with its pvalue
+  efftable <- data.frame(
+    effect = NA, 
+    pval = NA,
+    envir = envirs[e],
+    pmean = fitted_mean * 100
+  )
+  
+  # Compute the categorical effect and p-value
+  efftable$effect <- categorical_effect2(y = ptable$pfit * 100,
+                                         w = envir_prop[, e])
+  eff_distrib <- sapply(1:nsim, function(j) {
+    categorical_effect2(y = psim_means[, j] * 100,
+                        w = envir_prop[, e])
+  })
+  efftable$pval <- 1 - ecdf(eff_distrib)(efftable$effect)
+  
+  # turn probabilities into percentages:
+  ptable$pfit <- ptable$pfit * 100
+  ptable$pobs <- ptable$pobs * 100
+  
+  return(
+    list(
+      ptable = ptable,
+      efftable = efftable
+    )
+  )
+  
+})
+
+ddd <- datasub[, c("envir", "elev_class", "pp_class")]
+ddd <- ddd[!duplicated(ddd), ]
+
+# Extract predicted proababilities
+pred_table <- do.call("rbind", lapply(predlist, function(x) x[["ptable"]]))
+pred_table <- left_join(pred_table, ddd, by = "envir")
+
+eff_table <- do.call("rbind", lapply(predlist, function(x) x[["efftable"]]))
+eff_table <- left_join(eff_table, ddd, by = "envir")
+
+
+# Vegetation PPDP ---------------------------------------------------------
+
+fill_colors <- c(
+  viridis(5, option = "A", end = 0.85), # the most abundant
+  viridis(2, option = "A", begin = 0.96, end = 1)
+)
+
+# Replace labels for elevation and pp class
+pred_table$elev_class2 <- factor(
+  pred_table$elev_class, 
+  levels = c("elev_high", "elev_low"),
+  labels = c("High: [900; 1300) m a.s.l.", "Low: [500; 900) m a.s.l.")
+) 
+eff_table$elev_class2 <- factor(
+  eff_table$elev_class, 
+  levels = c("elev_high", "elev_low"),
+  labels = c("High: [900; 1300) m a.s.l.", "Low: [500; 900) m a.s.l.")
+) 
+pred_table$elev_title <- "Elevation"
+eff_table$elev_title <- "Elevation"
+
+## pp
+pred_table$pp_class2 <- factor(
+  pred_table$pp_class, 
+  levels = c("pp_low", "pp_high"),
+  labels = c("Low: [750; 1000) mm", "High: [1000; 1500) mm")
+) 
+eff_table$pp_class2 <- factor(
+  eff_table$pp_class, 
+  levels = c("pp_low", "pp_high"),
+  labels = c("Low: [750; 1000) mm", "High: [1000; 1500) mm")
+) 
+pred_table$pp_title <- "Precipitation"
+eff_table$pp_title <- "Precipitation"
 
 # put labels in each panel
-panlabs <- pdobs[!duplicated(pdobs[, c("elevation_class", "pp_class")]),
-                 c("elevation_class", "pp_class",
-                   "elevation_tit", "pp_tit")]
-panlabs$vegetation_class[panlabs$pp_class == "Low"] <- "Wet forest"
-panlabs$vegetation_class[panlabs$pp_class == "High"] <- "Grassland"
+eff_table$label <- c("(2)", "(3)", "(1)", "(4)")
+eff_table$vegetation_class <- factor(
+  c("Grassland", "Wet forest", "Wet forest", "Grassland"),
+  levels = veg_labels_sub
+)
+eff_table$y_label <- 17
+eff_table$y_effect <- 2.8
 
-pdobs$pfit %>% range # check useful limit
-panlabs$pfit <- 18
-panlabs$label <- c("(3)", "(1)", "(4)", "(2)")#c("C", "A", "D", "B")
-
-# Compute categorical effect at each condition
-vegeffs <- panlabs
-vegeffs$pfit <- 14.75
-vegeffs$eff <- NA
-vegeffs$pval <- NA
-vegeffs$text <- NA
-# import conditional vegetation model to estimate vegetation weights
-vegmod <- readRDS("exports/vegetation_model_gam.rds")
-pd_uni <- pdobs[, c(predictors_env,
-                    "elevation_class", "pp_class", "elevation_tit", "pp_tit")]
-pd_uni <- pd_uni[!duplicated(pd_uni), ]
-vpred <- predict(vegmod, pd_uni, type = "response")
-
-# compute effects
-for(cond in 1:nrow(vegeffs)) {
-  # cond = 1
-  # get vegetation types at each condition
-  eee <- vegeffs$elevation_class[cond]
-  ppp <- vegeffs$pp_class[cond]
-  rows_focal <- pdobs$elevation_class == eee &
-                pdobs$pp_class == ppp &
-                pdobs$show == "yes"
-
-  pdsub <- pdobs[rows_focal, ]
-  pmat_sub <- pmat[rows_focal, ]
-
-  veg_ids <- which(veg_labels_sub %in% pdsub$vegetation_class)
-
-  w <- vpred[cond, veg_ids]
-
-  eff_obs <- categorical_effect2(y = pdsub$pfit, w = w) * 100
-
-  # compute the effect across all simulations, for p-val
-  eff_sim <- sapply(1:ncol(pmat_sub), function(j) {
-    categorical_effect2(y = pmat_sub[, j], w = w) * 100
-  })
-  pval <- 1 - ecdf(eff_sim)(eff_obs)
-
-  vegeffs$eff[cond] <- eff_obs
-  vegeffs$pval[cond] <- pval
-  vegeffs$text[cond] <- paste(
-    format(round(eff_obs, 2), nsmall = 2), " %\n",
-    "(", format(round(pval, 3), nsmall = 3), ")", sep = ""
-  )
-
-}
-
-
-# Vegetation conditional --------------------------------------------------
+eff_table$eff_label <- paste(
+  round(eff_table$effect, 2), " %\n",
+  "(", round(eff_table$pval, 3), ")", sep = ""
+)
 
 # plot
-veg_cond <-
-ggplot(pdobs[pdobs$show == "yes", ],
-       aes(x = vegetation_class, y = pfit * 100,
-           fill = vegetation_class)) +
-
-  geom_hline(yintercept = mean(data_comp$burned) * 100,
+veg_ppdp <-
+  
+  # fitted probs data
+  ggplot(pred_table,
+         aes(x = vegetation_class, y = pfit, fill = vegetation_class)) +
+  
+  # average prob by environment
+  geom_hline(data = eff_table, mapping = aes(yintercept = pmean),
              linetype = "dashed", linewidth = 0.3, alpha = 0.8) +
-
+  
+  # fitted probs bar
   geom_bar(stat = "identity", width = 0.9, color = "black",
            alpha = 0.7, linewidth = 0.3) +
-
+  
   # p values
   geom_text(aes(x = vegetation_class, y = 17,#(pmax + 0.02) * 100,
                 label = pval), alpha = 0.85,
-            data = pdobs[pdobs$show == "yes", ],
             size = 2.8, inherit.aes = F) +
-
+  
   #scale_fill_viridis(option = "A", discrete = TRUE, end = 0.85) +
   scale_fill_manual(values = fill_colors[1:5]) +
-
+  
   # labels for panels
-  geom_text(aes(x = vegetation_class, y = pfit, label = label),
-            data = panlabs,
+  geom_text(aes(x = vegetation_class, y = y_label, label = label),
+            data = eff_table,
             size = 4.2, inherit.aes = F) +
-
+  
   # effects
-  geom_text(aes(x = vegetation_class, y = pfit, label = text),
-            data = vegeffs, alpha = 0.85,
+  geom_text(aes(x = vegetation_class, y = y_effect, label = eff_label),
+            data = eff_table, alpha = 0.85,
             size = 2.8, inherit.aes = F) +
-
-  facet_nested(rows = vars(elevation_tit, elevation_class),
-               cols = vars(pp_tit, pp_class)) +
-
+  
+  facet_nested(rows = vars(elev_title, elev_class2),
+               cols = vars(pp_title, pp_class2)) +
+  
   xlab("Vegetation type") +
   ylab("Burn probability (%)") +
   scale_y_continuous(expand = c(0, 0, 0, 0),
@@ -2572,205 +2600,25 @@ ggplot(pdobs[pdobs$show == "yes", ],
         legend.title = element_blank(),
         panel.grid.minor = element_blank(),
         legend.position = "none",
-        plot.title = element_text(hjust = -0.05))
+        plot.title = element_text(hjust = -0.05),
+        text = element_text(family = "Arial"))
 
-veg_cond
+veg_ppdp
 
 
-veg_dist <-
-  ggplot(data_vd, aes(x = "", y = veg_dist, fill = vegetation_class)) +
-  scale_fill_manual(values = fill_colors) +
-  geom_bar(stat = "identity", width = 1,
-           alpha = 0.7, linewidth = 0.3, color = "black") +
-  coord_polar("y", start = 0) +
-  labs(tag = "B",
-       title = "Relative abundance\nin the landscape") +
-  theme(panel.grid = element_blank(),
-        axis.text = element_blank(),
-        axis.ticks = element_blank(),
-        axis.title = element_blank(),
-        legend.position = "none",
-        plot.title.position = "panel",
-        plot.title = element_text(vjust = 0, hjust = 0.5, size = 9),
-        panel.border = element_blank())
-veg_dist
+# Merge vegetation plots --------------------------------------------------
 
 veg_all <- grid.arrange(
   grobs = list(veg_marg2,
                veg_dist + theme(plot.margin = margin(1, 1, 20, 1, "mm")),
-               veg_cond),
+               veg_ppdp),
   widths = c(2.1, 1),
   heights = c(1.3, 2),
   layout_matrix = matrix(c(1, 2, 3, 3), 2, 2, byrow = T)
 )
-
-ggsave("figures/06) veg_all.png", plot = veg_all,
+ggsave("figures/06) spatial patterns - vegetation_ppdp.png", plot = veg_all,
        width = 16, height = 21, units = "cm")
 
-
-# veg cond not deleting veg types -----------------------------------------
-
-# plot
-veg_cond_all <-
-  ggplot(pdobs,
-         aes(x = vegetation_class, y = pfit * 100,
-             fill = vegetation_class,
-             alpha = show,
-             color = show)) +
-  scale_alpha_manual(values = c(0.85, 0.3)) +
-  scale_color_manual(values = c("black", "gray")) +
-
-  geom_hline(yintercept = mean(data_comp$burned) * 100,
-             linetype = "dashed", linewidth = 0.3, alpha = 0.8) +
-
-  geom_bar(stat = "identity", width = 0.7,
-           linewidth = 0.3) +
-
-  # p values
-  geom_text(aes(x = vegetation_class, y = 20,
-                label = pval, alpha = show),
-            data = pdobs,
-            size = 2.8, inherit.aes = F) +
-
-  # scale_fill_viridis(discrete = T, end = 0.9, option = "A") +
-  scale_fill_viridis(option = "A", discrete = TRUE, end = 0.85) +
-  # scale_fill_viridis(option = "C", discrete = TRUE, end = 0.85) +
-  # scale_fill_viridis(discrete = T, end = 0.9, option = "A") +
-
-  # observed proportions
-  ggnewscale::new_scale_fill() +
-  geom_point(data = pdobs,
-             mapping = aes(x = vegetation_class, pobs * 100, alpha = show),
-             inherit.aes = F, size = 2.5,
-             #color = viridis(1, option = "A", begin = 0.15)) +
-             color = viridis(1, option = "A", begin = 0.15)) +
-
-  # # labels for panels
-  # geom_text(aes(x = vegetation_class, y = 27, label = label),
-  #           data = panlabs,
-  #           size = 4.2, inherit.aes = F) +
-
-  # # effects
-  # geom_text(aes(x = vegetation_class, y = 25, label = text),
-  #           data = vegeffs, alpha = 0.85,
-  #           size = 2.8, inherit.aes = F) +
-
-  facet_nested(rows = vars(elevation_tit, elevation_class),
-               cols = vars(pp_tit, pp_class)) +
-  scale_fill_viridis(discrete = TRUE, option = "A", end = 0.9) +
-
-  xlab("Vegetation type") +
-  ylab("Burn probability (%)") +
-  scale_y_continuous(expand = c(0, 0, 0, 0),
-                     limits = c(0, 22),
-                     breaks = seq(0, 20, by = 5)) +
-  scale_x_discrete(expand = expansion(add = 0.5)) +
-  theme(strip.background = element_rect(color = "white", fill = "white"),
-        axis.text.x = element_text(angle = 60, hjust = 0.5, vjust = 0.5, size = 9),
-        axis.title = element_text(size = 11),
-        strip.text = element_text(size = 11,
-                                  margin = margin(0.01, 0.01, 1, 1, "mm")),
-        axis.ticks.x = element_blank(),
-        legend.title = element_blank(),
-        panel.grid.minor = element_blank(),
-        legend.position = "none")
-veg_cond_all
-
-ggsave("figures/06) vegetation - conditional all types.png",
-       width = 16, height = 14, units = "cm")
-
-# Write reference values --------------------------------------------------
-
-# save reference values and means by veg:
-r1 <- sapply(ref_values2, function(x) {x[1]})
-r2 <- sapply(ref_values2, function(x) {
-  if(length(x) == 2) return(x[2]) else return(NA)
-})
-names(r1) <- names(r2) <- predictors_env
-ref_mat <- rbind(r1, r2)
-
-vegm_mat <- as.matrix(veg_means[, -1])
-rownames(vegm_mat) <- veg_levels_sub
-veg_text <- vegm_mat
-veg_text[,] <- NA
-
-# compute percentiles of the reference values in the corresponding distribution
-for(p in 1:length(predictors_env)) {
-  for(v in 1:nv) {
-    # p = 2; v = 1
-    mtext <- format(round(vegm_mat[v, p], 2), nsmall = 2)
-
-    ee <- ecdf(data_comp[data_comp$vegetation_class == veg_labels_sub[v],
-                         predictors_env[p]])
-    p1 <- ee(ref_mat[1, p])
-
-    # no percentiles for aspect
-    # if(p != which(predictors_env == "aspect")) {
-      p1text <- format(round(p1 * 100, 2), nsmall = 2)
-    # } else {
-      # p1text <- ""
-    # }
-
-    if(!is.na(ref_mat[2, p])) {
-      p2 <- ee(ref_mat[2, p])
-      p2text <- format(round(p2 * 100, 2), nsmall = 2)
-      separ <- ", "
-      percent2 <- " %"
-    } else {
-      separ <- p2text <- percent2 <- ""
-    }
-
-    veg_text[v, p] <- paste(mtext, "\n(", p1text, " %", separ,
-                            p2text, percent2, ")", sep = "")
-
-    if(p == which(predictors_env == "aspect")) {
-      veg_text[v, p] <- mtext
-    }
-  }
-}
-
-# format ref values
-rr <- apply(ref_mat, 2, function(x) format(round(x, 2), nsmall = 2))
-export_table <- rbind(veg_text, rr) %>% t
-rownames(export_table) <- names_frame$name2[names_frame$variable %in% predictors_env]
-# View(export_table)
-write.csv(export_table,
-          "exports/common_environment_reference_and_vegetation_means_cov-topo.csv")
-
-## NDVI reference values
-ndvi_ref_long <- pd[, c("ndvi_mean", "pp_class", "elevation_class",
-                        "vegetation_class")]
-ndvi_ref <- pivot_wider(ndvi_ref_long, names_from = "vegetation_class",
-                        values_from = "ndvi_mean")
-
-# add percentile in the NDVI distribution
-ndvi_ref2 <- ndvi_ref
-
-for(v in 1:nv) {
-  # v = 1
-  veg <- veg_labels_sub[v]
-  ee <- ecdf(data_comp[data_comp$vegetation_class == veg, "ndvi_mean"])
-  ndvi_vals <- ndvi_ref[, veg, drop = T]
-  percs <- ee(ndvi_vals)
-
-  texts <- character(nrow(ndvi_ref))
-  for(r in 1:nrow(ndvi_ref)) {
-    # r = 1
-    texts[r] <- paste(
-      format(round(ndvi_vals[r], 3), nsmall = 3),
-      "\n(",
-      format(round(percs[r] * 100, 2), nsmall = 2),
-      " %)",
-      sep = ""
-    )
-  }
-
-  ndvi_ref2[, veg] <- texts
-}
-# View(ndvi_ref2)
-
-write.csv(ndvi_ref2, "exports/common_environments_ndvi_ref_cov-topo.csv",
-          row.names = F)
 
 
 # Correlation between fire drivers ----------------------------------------
@@ -2876,3 +2724,115 @@ m_ppelev$r.squared # high R2!
 m_wbelev <- summary(lm(temp ~ wb + elevation, data = data))
 m_wbelev$r.squared # 0.835
 
+
+
+# Ordination - environment and vegetation ---------------------------------
+
+data_veg |> names()
+
+data_veg$northing <- cos(data_veg$aspect * pi / 180)
+hist(data_veg$northing)
+
+data_ord <- data_veg[, c("elevation", "slope", "northing", "TPI2k",
+                         "pp", "dist_human", "dist_roads")]
+data_ord_z <- scale(data_ord)
+
+ord <- vegan::rda(data_ord_z)
+plot(ord)
+
+biplot(ord, display = c("sites",
+                        "species"),
+       type = c("text",
+                "points"))
+
+ord$Ybar |> str()
+
+cc <- vegan::scores(ord)
+cc$sites
+
+sumord <- summary(ord)
+imp1 <- round(sumord$cont$importance["Proportion Explained", "PC1"] * 100, 2)
+imp2 <- round(sumord$cont$importance["Proportion Explained", "PC2"] * 100, 2)
+
+lab1 <- paste("Axis 1 (", imp1, " %)", sep = "")
+lab2 <- paste("Axis 2 (", imp2, " %)", sep = "")
+
+cc$sites
+
+ordtab <- data.frame(
+  x1 = cc$sites[, 1],
+  x2 = cc$sites[, 2],
+  veg = data_veg$vegetation_class
+)
+
+
+
+ggplot(ordtab, aes(x1, x2, fill = veg, color = veg, shape = veg)) +
+  # geom_point() +
+  ggdensity::geom_hdr(probs = c(0.90), alpha = 0.2) +
+  scale_fill_viridis(option = "B", end = 0.8, discrete = T, direction = -1,
+                     name = "Vegetation\ntype") +
+  scale_color_viridis(option = "B", end = 0.8, discrete = T, direction = -1,
+                      name = "Vegetation\ntype") +
+  xlab(lab1) +
+  ylab(lab2) +
+  theme(panel.grid.minor = element_blank())
+
+ggsave("figures/XX environmantal variables ordintaion with veg type.png",
+       width = 14, height = 10, units = "cm")
+
+
+# Refit models to compute R2 ----------------------------------------------
+
+# vegetation model
+vegmod <- glm(burned ~ vegetation_class, family = "binomial", data = data_veg)
+r2bern(fitted(vegmod))
+0.01507833
+
+# environmental model
+envmod <- bam(
+    burned ~
+      s(elevation, k = 3, bs = "cr") +
+      s(slope, k = 4, bs = "cr") +
+      s(aspect, k = 4, bs = "cc") +
+      s(TPI2k, k = 4, bs = "cr") +
+      s(pp, k = 3, bs = "cr") +
+      s(ndvi_mean, k = 4, bs = "cr") +
+      s(dist_human, k = 4, bs = "cr") +
+      s(dist_roads, k = 4, bs = "cr"),
+    knots = list(aspect = c(0, 360)),
+    family = "binomial", data = data_veg, discrete = T, nthreads = 8
+  )
+r2bern(fitted(envmod))
+0.08354483
+
+jointmod <- bam(
+    burned ~
+      vegetation_class +
+      s(elevation, by = vegetation_class, k = 3, bs = "cr", id = 1) +
+      s(slope, by = vegetation_class, k = 4, bs = "cr", id = 2) +
+      s(aspect, by = vegetation_class, k = 4, bs = "cc", id = 3) +
+      s(TPI2k, by = vegetation_class, k = 4, bs = "cr", id = 4) +
+      s(pp, by = vegetation_class, k = 3, bs = "cr", id = 5) +
+      s(ndvi_mean, by = vegetation_class, k = 4, bs = "cr", id = 6) +
+      s(dist_human, by = vegetation_class, k = 4, bs = "cr", id = 7) +
+      s(dist_roads, by = vegetation_class, k = 4, bs = "cr", id = 8),
+    knots = list(aspect = c(0, 360)),
+    family = "binomial", data = data_veg, discrete = T, nthreads = 8
+)
+r2bern(fitted(jointmod))
+0.1272726
+
+# Likelihood ration test
+
+lmtest::lrtest(envmod, jointmod)
+
+# #     Df  LogLik     Df  Chisq Pr(>Chisq)
+# 1 15.949 -1612.6
+# 2 72.532 -1488.1 56.583  249.01  < 2.2e-16 ***
+
+lmtest::lrtest(vegmod, jointmod)
+
+# #     Df  LogLik     Df  Chisq Pr(>Chisq)
+# 1  5.000 -1826.9
+# 2 72.532 -1488.1 67.532 677.65  < 2.2e-16 ***

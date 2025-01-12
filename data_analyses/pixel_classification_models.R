@@ -231,7 +231,7 @@ ggplot(train_long, aes(x = value, y = Burned, colour = ndvi_max)) +
   ggtitle("A")
 plot1
 
-# kesigue? ----------------------------------------------------------------
+# Cross validation --------------------------------------------------------
 
 # Evaluar sensibilidad y especificidad en función de umbrales de probabilidad
 # para cada modelo. 30 fold CV.
@@ -477,7 +477,7 @@ ggplot(accu_long, aes(x = threshold, y = accuracy, colour = model)) +
 
 # Son buenísimos. De hecho, es increíblemente bueno el dnbr_min.
 # Pero ambos mucho mejores que el dnbr_mean.
-# Aún así, dnbrsubió su accuracy agregando el NDVI (un 1 %)
+# Aún así, dnbr subió su accuracy agregando el NDVI (un 1 %)
 
 
 # Coefs para copiar -------------------------------------------------------

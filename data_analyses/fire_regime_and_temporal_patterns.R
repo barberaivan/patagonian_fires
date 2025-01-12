@@ -562,6 +562,12 @@ coef_table_ts <- rbind(
 
 # da muy parecido.
 
+
+
+# Correlation between climatic variables ----------------------------------
+
+cor(climate[, c(3, 2, 4, 6)])
+
 # Intraannual fire activity -----------------------------------------------
 
 

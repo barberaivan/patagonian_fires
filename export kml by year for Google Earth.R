@@ -46,6 +46,53 @@ for(y in years) {
 # la lista deplegable.
 
 
+# Do the same for patagonian_fires_extended -------------------------------
+
+fires_old <- readOGR("patagonian_fires_extended/patagonian_fires_extended.shp")
+fires_both <- rbind(fires_old[fires_old$year < 1999, ],
+                    fires[, names(fires_old)])
+# save by year
+years <- na.omit(unique(fires_both@data$year))
+
+
+# For a correct display of names in Google Earth:
+
+# https://stackoverflow.com/questions/57415464/label-kml-features-using-st-write
+# https://michaelminn.net/tutorials/r-kml/index.html
+
+# (from the latter)
+# # Write
+# writeOGR(utm_zones, "utm_zones.kml", "Universal Transverse Mercator Zones", driver="KML",
+#          layer_options=c(NameField = "NAME", DescriptionField = "NAME"))
+
+fires2 <- fires_both
+names(fires2@data)
+
+# rename
+# if name is NA, make it fire_id
+for(f in 1:nrow(fires)) {
+  fires2$name[f] <- ifelse(is.na(fires2$name[f]), fires2$fire_id[f], fires2$name[f])
+}
+
+# View(fires2@data) # OK
+
+# order by date
+fires2 <- fires2[order(fires2$year, fires2$date), ]
+
+# write csv
+# write.csv(fires2@data, "patagonian_fires/google_earth_files/fires_data.csv")
+
+for(y in years) {
+  #y = 1999
+  writeOGR(fires2[fires2@data$year == y, ],
+           dsn = paste("patagonian_fires_extended/google_earth_files/",
+                       y, ".kml", sep = ""),
+           layer = as.character(y),
+           layer_options = c(NameField = "name2"),
+           driver = "KML")
+}
+# En Google Earth fire_id se llama "name", para que los nombres se vean en
+# la lista deplegable.
 
 # Do the same for patagonian_fires_eastern --------------------------------
 
