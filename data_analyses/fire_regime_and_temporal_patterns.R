@@ -24,7 +24,7 @@ library(DHARMa)
 # from https://rpubs.com/mclaire19/ggplot2-custom-themes
 
 theme_mine <- function() {
-  font <- "Arial"   #assign font family up front
+  # font <- "Liberation Sans"   #assign font family up front
   marg <- 2 # figure margin in mm
 
   theme_bw() %+replace%    #replace elements we want to change
@@ -38,7 +38,7 @@ theme_mine <- function() {
 
       #text elements
       plot.title = element_text(             #title
-        family = font,            #set font family
+        # family = font,            #set font family
         size = 16,                #set font size
         #face = 'bold',            #bold typeface
         hjust = -0.1,                #left align
@@ -49,7 +49,7 @@ theme_mine <- function() {
       #   size = 14),               #font size
 
       axis.title = element_text(             #axis titles
-        family = font,            #font family
+        # family = font,            #font family
         size = 12),
 
       # para separar el eje y de los nros
@@ -58,14 +58,14 @@ theme_mine <- function() {
         angle = 90),
 
       axis.text = element_text(              #axis text
-        family = font,            #axis family
+        # family = font,            #axis family
         size = 9),                #font size
 
       legend.title = element_blank(),
       legend.position = "bottom",
-      legend.text = element_text(size = 9, family = font),
+      legend.text = element_text(size = 9), #, family = font
 
-      strip.text = element_text(size = 12, family = font, color = "white"),
+      strip.text = element_text(size = 12, color = "white"), # family = font, 
       strip.text.x = element_text(margin = margin(1.2,0,1.2,0, "mm")), # tamaño de la cajita
       strip.text.y = element_text(margin = margin(0,1.2,0,1.2, "mm")),
       strip.background = element_rect(fill = "gray10", color = "gray10"),
@@ -444,6 +444,9 @@ clim_fig <- ggarrange(ts_area_temp, ts_fires_fwi, clim_area, clim_fires,
 ggsave("figures/03) temporal patterns_monotonic.jpeg",
        clim_fig,
        width = 16, height = 20, units = "cm")
+ggsave("figures_spanish/03) temporal patterns_monotonic.pdf",
+       clim_fig, bg = "white",
+       width = 16, height = 20, units = "cm")
 
 # Data for text
 
@@ -539,6 +542,10 @@ coef_export <- cbind(
 # rownames(coef_export) <- coef_export$variable
 # coef_export[c("Burned area", "Number of fires"), ]$Estimate <- round(exp(coef_export[c("Burned area", "Number of fires"), ]$Estimate), 4)
 write.csv(coef_export, "exports/trends.csv", row.names = F)
+coef_export <- read.csv("exports/trends.csv")
+
+knitr::kable(coef_export, "latex")
+
 
 
 # Theil-Sen regression (Thomas pide)
@@ -923,6 +930,10 @@ ggarrange(size_props + ggtitle("A"),
 ggsave("figures/02) size distribution and seasonality_b.jpeg",
        size_season,
        width = 16, height = 14, units = "cm", dpi = 300)
+ggsave("figures_spanish/02) size distribution and seasonality_b.pdf",
+       size_season, bg = "white",
+       width = 16, height = 14, units = "cm", dpi = 300)
+
 
 # Burned area global results ----------------------------------------------
 

@@ -25,7 +25,7 @@ train <- train[-errorcito, ]
 # from https://rpubs.com/mclaire19/ggplot2-custom-themes
 
 theme_mine <- function() {
-  font <- "Arial"   #assign font family up front
+  # font <- "Liberation Sans"   #assign font family up front
   marg <- 2 # figure margin in mm
 
   theme_bw() %+replace%    #replace elements we want to change
@@ -39,7 +39,7 @@ theme_mine <- function() {
 
       #text elements
       plot.title = element_text(             #title
-        family = font,            #set font family
+        # family = font,            #set font family
         size = 16,                #set font size
         #face = 'bold',            #bold typeface
         hjust = -0.1,                #left align
@@ -50,7 +50,7 @@ theme_mine <- function() {
       #   size = 14),               #font size
 
       axis.title = element_text(             #axis titles
-        family = font,            #font family
+        # family = font,            #font family
         size = 12),
 
       # para separar el eje y de los nros
@@ -59,14 +59,14 @@ theme_mine <- function() {
         angle = 90),
 
       axis.text = element_text(              #axis text
-        family = font,            #axis family
+        # family = font,            #axis family
         size = 9),                #font size
 
       legend.title = element_blank(),
       legend.position = "bottom",
-      legend.text = element_text(size = 9, family = font),
+      legend.text = element_text(size = 9), # , family = font
 
-      strip.text = element_text(size = 12, family = font, color = "white"),
+      strip.text = element_text(size = 12, color = "white"), # family = font, 
       strip.text.x = element_text(margin = margin(1.2,0,1.2,0, "mm")), # tamaño de la cajita
       strip.text.y = element_text(margin = margin(0,1.2,0,1.2, "mm")),
       strip.background = element_rect(fill = "gray10", color = "gray10"),
@@ -267,7 +267,7 @@ cand_lines <- data.frame(threshold = c(0.20, 0.25, 0.25),
 plot2 <-
   ggplot(senspec_long, aes(x = threshold, y = error_value, colour = error_name)) +
   geom_line(size = 0.7) +
-  ylim(0, 0.15) +
+  ylim(0, 0.3) +
   facet_wrap(vars(model), nrow = 1) +
   ggtitle("B") +
   ylab("Error rate") +
@@ -293,7 +293,9 @@ ggarrange(plot1 +
           plot2 +
             theme(axis.text = element_text(size = 7)),
           nrow = 2)
-ggsave("figures/S03) pixel level classication_leave-fire-out.jpeg",
+ggsave("figures/S06) pixel level classication_leave-fire-out.jpeg",
+       width = 16, height = 11, units = "cm", dpi = 300)
+ggsave("figures_spanish/S06) pixel level classication_leave-fire-out.pdf",
        width = 16, height = 11, units = "cm", dpi = 300)
 
 

@@ -990,6 +990,7 @@ ggsave("figures/XX spatial patterns - fire by veg and pp-ndvi-dist - univariate.
 # and precipitation. In this way, the multiple model including NDVI
 # can show partial effects of covariates but retaining the NDVI effect.
 predictors_env <- predictors[predictors != "ndvi_mean"]
+predictors_ndvi <- predictors_env[grep("dist", predictors_env, invert = T)]
 rows_comp <- data$vegetation_class %in% veg_labels_sub
 data_comp <- data[rows_comp, ]
 nv <- veg_labels_sub %>% length
@@ -1020,9 +1021,8 @@ ndvi_models <- list(
   )
 )
 
-predictors_ndvi <- predictors_env[grep("dist", predictors_env, invert = T)]
-
 # saveRDS(ndvi_models, "exports/models_ndvi.rds")
+ndvi_models <- readRDS("exports/models_ndvi.rds")
 
 # NDVI models predictions --------------------------------------------------
 
@@ -1134,6 +1134,8 @@ ndvi_plot_all <- egg::ggarrange(plots = pndvi_list, ncol = length(pndvi_list))
 
 ggsave("figures/S06) NDVI model predictions.png", plot = ndvi_plot_all,
        width = 16, height = 16.5, units = "cm")
+ggsave("figures_spanish/S06) NDVI model predictions.pdf", plot = ndvi_plot_all,
+       width = 16, height = 16.5, units = "cm", bg = "white")
 
 
 # Topographic models ------------------------------------------------------
@@ -1200,6 +1202,7 @@ for(pred in topo) {
 # mtopo[["elevation"]][["TPI2k"]][["veg"]] %>% plot
 
 # saveRDS(mtopo, "exports/models_topography.rds")
+mtopo <- readRDS("exports/models_topography.rds")
 
 # Distance models ----------------------------------------------------------
 
@@ -1260,6 +1263,7 @@ for(pred in distv) {
 # mdist[["dist_human"]][["dist_roads"]][["all"]] %>% summary
 
 # saveRDS(mdist, "exports/models_distances.rds")
+mdist <- readRDS("exports/models_distances.rds")
 
 # Multivariate fire models -----------------------------------------------
 
@@ -1803,11 +1807,17 @@ fire_multi_topo <- ggarrange(plots = plist_multi[1:4], ncol = 4)
 ggsave("figures/04) spatial patterns - environment topo.png",
        plot = fire_multi_topo,
        width = 16, height = 16.5, units = "cm")
+ggsave("figures_spanish/04) spatial patterns - environment topo.pdf",
+       plot = fire_multi_topo,
+       width = 16, height = 16.5, units = "cm", bg = "white")
 
 fire_multi_pp <- ggarrange(plots = plist_multi[c(6, 5, 7, 8)], ncol = 4)
 ggsave("figures/05) spatial patterns - environment pp.png",
        plot = fire_multi_pp,
        width = 16, height = 16.5, units = "cm")
+ggsave("figures_spanish/05) spatial patterns - environment pp.pdf",
+       plot = fire_multi_topo,
+       width = 16, height = 16.5, units = "cm", bg = "white")
 
 # Multivariate fire plots - vegetation types side by side -----------------
 
@@ -2105,9 +2115,13 @@ for(p in 1:Pcov) {
 
 
 fire_multi_ndvi_varfix <- ggarrange(plots = plist_cov, ncol = Pcov)
-ggsave("figures/S07) burn probability varying predictors or not.png",
+ggsave("figures/S08) burn probability varying predictors or not.png",
        plot = fire_multi_ndvi_varfix,
        width = 24, height = 16.5, units = "cm")
+ggsave("figures_spanish/S08) burn probability varying predictors or not.pdf",
+       plot = fire_multi_ndvi_varfix,
+       width = 24, height = 16.5, units = "cm", bg = "white")
+
 
 # Burn prob ~ vegetation, marginal ---------------------------------------
 
@@ -2295,8 +2309,7 @@ veg_marg2 <-
         axis.title.x = element_blank(),
         plot.title = element_text(hjust = -0.05),
         legend.position = "none",
-        plot.margin = margin(2, 2, 4, 2, "mm"),
-        text = element_text(family = "Arial")) +
+        plot.margin = margin(2, 2, 4, 2, "mm")) +
   guides(colour = guide_legend(order = 1),
          shape = guide_legend(order = 2))
 veg_marg2
@@ -2319,8 +2332,7 @@ veg_dist <-
         legend.position = "none",
         plot.title.position = "panel",
         plot.title = element_text(vjust = 0, hjust = 0.5, size = 9),
-        panel.border = element_blank(),
-        text = element_text(family = "Arial"))
+        panel.border = element_blank())
 veg_dist
 
 
@@ -2600,8 +2612,7 @@ veg_ppdp <-
         legend.title = element_blank(),
         panel.grid.minor = element_blank(),
         legend.position = "none",
-        plot.title = element_text(hjust = -0.05),
-        text = element_text(family = "Arial"))
+        plot.title = element_text(hjust = -0.05))
 
 veg_ppdp
 
@@ -2617,6 +2628,9 @@ veg_all <- grid.arrange(
   layout_matrix = matrix(c(1, 2, 3, 3), 2, 2, byrow = T)
 )
 ggsave("figures/06) spatial patterns - vegetation_ppdp.png", plot = veg_all,
+       width = 16, height = 21, units = "cm")
+ggsave("figures_spanish/06) spatial patterns - vegetation_ppdp.pdf", 
+       plot = veg_all, bg = "white",
        width = 16, height = 21, units = "cm")
 
 
@@ -2662,8 +2676,8 @@ for(v in 1:V) {
     theme(panel.grid.minor = element_blank()) +
     ggtitle(veg_model2[v])
 
-  nn <- paste("figures/", "pairs_by_veg_", v, ".png", sep = "")
-  ggsave(filename = nn, plot = pa1,
+  nn <- paste("figures_spanish/", "pairs_by_veg_", v, ".pdf", sep = "")
+  ggsave(filename = nn, plot = pa1, bg = "white",
          width = 16, height = 16, units = "cm")
 }
 
@@ -2778,16 +2792,18 @@ ggplot(ordtab, aes(x1, x2, fill = veg, color = veg, shape = veg)) +
   ylab(lab2) +
   theme(panel.grid.minor = element_blank())
 
-ggsave("figures/XX environmantal variables ordintaion with veg type.png",
+ggsave("figures/S03) environmantal variables ordintaion with veg type.png",
        width = 14, height = 10, units = "cm")
 
+ggsave("figures_spanish/S03) environmantal variables ordintaion with veg type.pdf",
+       width = 14, height = 10, units = "cm")
 
 # Refit models to compute R2 ----------------------------------------------
 
 # vegetation model
 vegmod <- glm(burned ~ vegetation_class, family = "binomial", data = data_veg)
 r2bern(fitted(vegmod))
-0.01507833
+# 0.01507833
 
 # environmental model
 envmod <- bam(
@@ -2804,7 +2820,7 @@ envmod <- bam(
     family = "binomial", data = data_veg, discrete = T, nthreads = 8
   )
 r2bern(fitted(envmod))
-0.08354483
+# 0.08354483
 
 jointmod <- bam(
     burned ~
@@ -2821,7 +2837,7 @@ jointmod <- bam(
     family = "binomial", data = data_veg, discrete = T, nthreads = 8
 )
 r2bern(fitted(jointmod))
-0.1272726
+# 0.1272726
 
 # Likelihood ration test
 

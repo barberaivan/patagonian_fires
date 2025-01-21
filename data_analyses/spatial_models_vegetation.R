@@ -438,6 +438,8 @@ veg_props <- as.numeric(table(data_veg$vegetation_class) / nrow(data_veg))
 
 names(vegplot_list) <- names(vegplot_list_dens) <- predictors
 
+load <- T
+
 for(p in predictors) {
   print(p)
   # reduce dataset, and name predictor as "x"
@@ -449,6 +451,7 @@ for(p in predictors) {
   if(p == "aspect") {bs = "cc"; knots = list(x = c(0, 360)) }
 
   # fit model
+  if(!load) {
   vm <- gam(
     list(veg_num ~ s(x, k = kn, bs = bs),
                  ~ s(x, k = kn, bs = bs),
@@ -459,6 +462,8 @@ for(p in predictors) {
   )
   mname <- paste("exports/vegetation_model_gam", "_", p, ".rds", sep = "")
   saveRDS(vm, mname)
+  }
+  mname <- paste("exports/vegetation_model_gam", "_", p, ".rds", sep = "")
   vm <- readRDS(mname)
 
   # r2 for the model: bayesian r2 for every class, weigthed by class abundance.
@@ -489,6 +494,7 @@ for(p in predictors) {
                       veg = 1:K,
                       sim = 1:nsim
                     ))
+  if(!load) {
   # Simulate parameter vectors
   set.seed(123)
   coef_samples <- rmvn(nsim, coef(vm),
@@ -510,6 +516,8 @@ for(p in predictors) {
   }
   arrname <- paste("exports/vegetation_model_gam_predictions_array_marg", "_", p, ".rds", sep = "")
   saveRDS(pred_arr, arrname)
+  }
+  arrname <- paste("exports/vegetation_model_gam_predictions_array_marg", "_", p, ".rds", sep = "")
   pred_arr <- readRDS(arrname)
 
   # compute ci and longanize array:
@@ -637,6 +645,9 @@ vegplot_marg_dens <- ggarrange(plots = aaa, nrow = 4,
 ggsave("figures/S01) vegetation and drivers marginal.png",
        plot = vegplot_marg_dens,
        width = 16, height = 14, units = "cm")
+ggsave("figures_spanish/S01) vegetation and drivers marginal.pdf",
+       plot = vegplot_marg_dens,
+       width = 16, height = 14, units = "cm")
 
 
 # Veg models R2 table ----------------------------------------------------
@@ -654,6 +665,7 @@ fffull <- cbind(data.frame(Variable = "Multiple regression"),
 r2_export <- rbind(r2table_veg, fffull)
 write.csv(r2_export, "exports/vegetation_models_r2.csv")
 
+knitr::kable(r2_export, "latex")
 
 # Conditional predictions using focal mean --------------------------------
 
@@ -958,6 +970,10 @@ vegsep_dens <- egg::ggarrange(plots = c(pl_dens, pl_facet), ncol = P, nrow = 2,
 ggsave("figures/S02) vegetation drivers conditional.png",
        plot = vegsep_dens,
        width = 24, height = 14, units = "cm")
+ggsave("figures_spanish/S02) vegetation drivers conditional.pdf",
+       plot = vegsep_dens, bg = "white",
+       width = 24, height = 14, units = "cm")
+
 
 # Conditional predictions using focal mean - co-varying predictor ----------
 
@@ -1246,6 +1262,9 @@ vegsep_dens <- egg::ggarrange(plots = c(pl_dens, pl_facet), ncol = P, nrow = 2,
 
 ggsave("figures/S02) vegetation drivers conditional_cov.png",
        plot = vegsep_dens,
+       width = 24, height = 14, units = "cm")
+ggsave("figures_spanish/S02) vegetation drivers conditional_cov.pdf",
+       plot = vegsep_dens, bg = "white",
        width = 24, height = 14, units = "cm")
 
 # Ordination ---------------------------------------------------------------
