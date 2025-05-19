@@ -19,6 +19,8 @@ library(mgcv)
 library(scam)
 library(DHARMa)
 
+library(bbmle) # likelihood profile
+
 # custom ggplot theme -----------------------------------------------------
 
 # from https://rpubs.com/mclaire19/ggplot2-custom-themes
@@ -111,6 +113,12 @@ climate <- cbind(climate[climate$year > 1998, ], fwi = fwi_agg$fwi)
 burned_annual_clim <- left_join(
   burned_annual, climate, by = "year"
 )
+
+
+# out <- burned_annual_clim[, c("year", "area_ha", "fires", "pp", "temp", "vpd", "fwi")]
+# write.csv(out, "data/data_burned_area_by_year_clim.csv",
+#           row.names = F)
+
 burned_annual_clim_long <- pivot_longer(
   burned_annual_clim, which(names(burned_annual_clim) %in% c("pp", "temp",
                                                              "vpd", "wind", "fwi")),
@@ -546,11 +554,8 @@ coef_export <- read.csv("exports/trends.csv")
 
 knitr::kable(coef_export, "latex")
 
-
-
 # Theil-Sen regression (Thomas pide)
 library(RobustLinearReg)
-theil_sen_regression()
 
 burned_annual$area_log <- log(burned_annual$area_ha)
 mts_area <- theil_sen_regression(area_log ~ year, data = burned_annual)
@@ -569,6 +574,84 @@ coef_table_ts <- rbind(
 
 # da muy parecido.
 
+
+# Likelihood profile for area ts ------------------------------------------
+
+burned_annual$year_z <- burned_annual$year - mean(burned_annual$year)
+
+nll <- function(alpha, beta, phi) {
+  mu <- exp(alpha + beta * burned_annual$year_z)
+  a <- 1 / phi
+  b <- 1 / (phi * mu)
+  out <- -sum(dgamma(burned_annual$area_perc, a, b, log = T))
+  return(out)
+}
+
+# Using bbmle
+fit <- mle2(
+  nll, 
+  start = list(
+    alpha = mean(log(burned_annual$area_perc)), 
+    beta = 0.05, phi = 0.5
+  )
+)
+summary(fit)
+
+# Grid of beta values to test
+beta_grid <- seq(-0.2, 0.3, length.out = 200)
+
+# Store maximum log-likelihood for normalization
+loglik_profile <- numeric(length(beta_grid))
+
+# Loop over beta values
+for (i in seq_along(beta_grid)) {
+  print(i)
+  b <- beta_grid[i]
+  
+  fit <- mle2(nll,
+              start = list(alpha = -1.455671, phi = 2.080811),
+              fixed = list(beta = b),
+              method = "Nelder-Mead")
+  
+  loglik_profile[i] <- -fit@min  # Save log-likelihood
+}
+
+# Normalize to maximum
+lik_profile <- exp(loglik_profile - max(loglik_profile))  # Likelihood scale
+
+# Plot
+plot(beta_grid, lik_profile, type = "l", lwd = 2,
+     xlab = expression(beta), ylab = "Verosimilitud relativa",
+     main = "Perfil de verosimilitud para la pendiente")
+abline(v = beta_grid[which.max(lik_profile)], col = "blue", lty = 2)
+abline(v = 0, col = "red", lty = 2)
+
+
+# Now, as Bayesians
+
+# Step 1: Normalize the likelihood to get the posterior
+delta_beta <- diff(beta_grid)[1]  # assuming equal spacing
+area_total <- sum(lik_profile * delta_beta)
+posterior_density <- lik_profile / area_total
+
+# Step 2: Compute probability that beta > 0
+idx_above_zero <- which(beta_grid > 0)
+prob_beta_gt_0 <- sum(posterior_density[idx_above_zero] * delta_beta)
+
+# Step 3: Plot
+plot(beta_grid, posterior_density, type = "l", lwd = 2,
+     ylab = "Posterior density", xlab = expression(beta),
+     main = expression("Posterior for " * beta * " (under flat prior)"))
+
+# Step 4: Add shading for beta > 0
+polygon(c(beta_grid[idx_above_zero], rev(beta_grid[idx_above_zero])),
+        c(posterior_density[idx_above_zero], rep(0, length(idx_above_zero))),
+        col = rgb(0, 0, 1, 0.3), border = NA)
+
+# Step 5: Annotate the probability using expression()
+text(x = max(beta_grid) * 0.7, y = max(posterior_density) * 0.8,
+     labels = bquote("Pr(" * beta > 0 * ") = " * .(round(prob_beta_gt_0, 3))),
+     col = "blue")
 
 
 # Correlation between climatic variables ----------------------------------

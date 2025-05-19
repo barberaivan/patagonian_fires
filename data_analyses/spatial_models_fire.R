@@ -1816,7 +1816,7 @@ ggsave("figures/05) spatial patterns - environment pp.png",
        plot = fire_multi_pp,
        width = 16, height = 16.5, units = "cm")
 ggsave("figures_spanish/05) spatial patterns - environment pp.pdf",
-       plot = fire_multi_topo,
+       plot = fire_multi_pp,
        width = 16, height = 16.5, units = "cm", bg = "white")
 
 # Multivariate fire plots - vegetation types side by side -----------------
@@ -2267,6 +2267,15 @@ fill_colors <- c(
   viridis(5, option = "A", end = 0.85), # the most abundant
   viridis(2, option = "A", begin = 0.96, end = 1)
 )
+
+
+## Transform 20-years burn probability into fire rotation period.
+
+p20 <- props_data$pobs
+p_annual <- 1 - (1 - p20) ^ (1 / 24)
+plot(p_annual ~ p20)
+frp <- 1 / p_annual
+round(frp, 0) # 372 690 167 238 334 804 180
 
 # Vegetation marginal -----------------------------------------------------
 
